@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Document</title>
+    <script src="../../dist/vue.global.js"></script>
+  </head>
+  <body>
+    <div></div>
+    <script>
+      const { reactive, effect } = Vue
+
+      const state = reactive({
+        count: 66
+      })
+
+      effect(() => {
+        document.querySelector('div').textContent = `数字是 ${state.count}`
+      })
+
+      setTimeout(() => {
+        state.count = 88
+      }, 3000)
+    </script>
+  </body>
+</html>
