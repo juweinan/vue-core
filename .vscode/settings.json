@@ -13,5 +13,7 @@
   },
   "[json]": {
     "editor.defaultFormatter": "esbenp.prettier-vscode"
-  }
+  },
+  "terminal.integrated.cwd": "${workspaceFolder}",
+  "terminal.integrated.shellArgs.osx": ["-l", "-c", "eval \"$(fnm env --use-on-cd)\" && exec zsh"]
 }

@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(brew --version:*)",
+      "Bash(brew doctor:*)",
+      "Bash(brew update:*)",
+      "Bash(brew install:*)",
+      "Bash(echo:*)",
+      "Bash(~/.zshrc)",
+      "Bash(fnm --version:*)",
+      "Bash(fnm install:*)",
+      "Bash(fnm list:*)"
+    ]
+  }
+}
