@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Document</title>
+  </head>
+  <body>
+    <script>
+      const originConfig = {
+        sum: 2,
+        price: 10
+      }
+
+      let total = 0
+
+      const proxy = new Proxy(originConfig, {
+        // 这里的 target 其实就是 被代理对象
+        get(target, key, receiver) {
+          return target[key]
+        },
+        set(target, key, value, receiver) {
+          target[key] = value
+          effectFn1()
+          return true
+        }
+      })
+
+      // 访问 originConfig 的属性，并不会触发 getter
+      const effectFn1 = () => {
+        total = originConfig.sum * originConfig.price
+      }
+
+      // 访问代理对象的属性，可以出发 getter
+      const effectFn2 = () => {
+        total = proxy.sum * proxy.price
+      }
+    </script>
+  </body>
+</html>
