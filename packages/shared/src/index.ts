@@ -69,13 +69,18 @@ export const toTypeString = (value: unknown): string =>
   objectToString.call(value)
 
 export const toRawType = (value: unknown): string => {
-  // extract "RawType" from strings like "[object RawType]"
+  // 从类似 “[object RawType]” 的字符串中提取 “RawType”
   return toTypeString(value).slice(8, -1)
 }
 
 export const isPlainObject = (val: unknown): val is object =>
   toTypeString(val) === '[object Object]'
 
+/**
+ * 是否是一个整数的字符串（也就是是否是一个数组索引）
+ * @param key 
+ * @returns 
+ */
 export const isIntegerKey = (key: unknown) =>
   isString(key) &&
   key !== 'NaN' &&

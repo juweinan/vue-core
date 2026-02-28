@@ -14,10 +14,15 @@ import {
 import type { UnwrapRefSimple, Ref, RawSymbol } from './ref'
 
 export const enum ReactiveFlags {
+  // 如果一个对象被标记了 __v_skip，那么这个对象就永远不会被转换成响应式代理对象了
   SKIP = '__v_skip',
+  // 用于标识一个对象是否是通过 reactive 或者 shallowReactive 创建的响应式对象
   IS_REACTIVE = '__v_isReactive',
+  // 用于标识一个对象是否是通过 readonly 或者 shallowReadonly 创建的只读对象
   IS_READONLY = '__v_isReadonly',
+  // 用于标识一个对象是否是通过 shallowReactive 或者 shallowReadonly 创建的浅层代理对象
   IS_SHALLOW = '__v_isShallow',
+  // 指向的是被代理的原始对象，如果一个对象被代理过了，那么访问 proxy.__v_raw 就一定能拿到原始对象
   RAW = '__v_raw'
 }
 
@@ -55,6 +60,12 @@ function targetTypeMap(rawType: string) {
   }
 }
 
+/**
+ * 获取目标对象的类型
+ * 如果目标对象是被标记 __v_skip 或者不是可扩展（不可以在上面添加新的属性）的对象
+ * 那么就返回 INVALID
+ * 否则根据目标对象的原始类型，返回 COMMON 或者 COLLECTION
+ */
 function getTargetType(value: Target) {
   return value[ReactiveFlags.SKIP] || !Object.isExtensible(value)
     ? TargetType.INVALID
@@ -65,15 +76,12 @@ function getTargetType(value: Target) {
 export type UnwrapNestedRefs<T> = T extends Ref ? T : UnwrapRefSimple<T>
 
 /**
- * Creates a reactive copy of the original object.
+ * 为原始对象创建一个响应式的副本
  *
- * The reactive conversion is "deep"—it affects all nested properties. In the
- * ES2015 Proxy based implementation, the returned proxy is **not** equal to the
- * original object. It is recommended to work exclusively with the reactive
- * proxy and avoid relying on the original object.
+ * 响应式转换是 “深度的”，他会影响所有的嵌套属性。在基于 ES2015 Proxy 的实现中，返回的 proxy 对象跟原始对象是不相等的。
+ * 因此建议使用返回的 proxy 对象，避免依赖原始对象
  *
- * A reactive object also automatically unwraps refs contained in it, so you
- * don't need to use `.value` when accessing and mutating their value:
+ * 响应式对象还会自动解包其中包含的引用（refs），因此在访问和修改时，不需要使用 .value
  *
  * ```js
  * const count = ref(0)
@@ -88,7 +96,7 @@ export type UnwrapNestedRefs<T> = T extends Ref ? T : UnwrapRefSimple<T>
  */
 export function reactive<T extends object>(target: T): UnwrapNestedRefs<T>
 export function reactive(target: object) {
-  // if trying to observe a readonly proxy, return the readonly version.
+  // 如果尝试去观察一个只读的 proxy，返回只读版本（这也说明，reactive 不会处理 readonly 代理对象）
   if (isReadonly(target)) {
     return target
   }
@@ -178,37 +186,48 @@ export function shallowReadonly<T extends object>(target: T): Readonly<T> {
   )
 }
 
+/**
+ * 创建响应式对象的核心函数
+ * @param target 被代理对象
+ * @param isReadonly 是否只读（reactive 的时候，肯定是 false）
+ * @param baseHandlers target 是普通对象或者数组的时候，使用 baseHandlers 作为 proxy 的 handler
+ * @param collectionHandlers target 是 map、set、weakmap 或者 weakset 的时候，使用 collectionHandlers 作为 proxy 的 handler  
+ * @param proxyMap 用于缓存被代理对象和代理对象的映射关系，防止一个原始对象多次调用 reactive 或者 readonly 生成多个代理对象
+ * @returns 返回生成的代理对象
+ */
 function createReactiveObject(
-  target: Target,
+  target: Target, 
   isReadonly: boolean,
   baseHandlers: ProxyHandler<any>,
   collectionHandlers: ProxyHandler<any>,
   proxyMap: WeakMap<Target, any>
 ) {
+  // 只有对象才可以被代理，如果不是对象，直接返回原始值
   if (!isObject(target)) {
     if (__DEV__) {
       console.warn(`value cannot be made reactive: ${String(target)}`)
     }
     return target
   }
-  // target is already a Proxy, return it.
-  // exception: calling readonly() on a reactive object
+  // 被代理对象已经是一个代理对象了，返回它（通过 ReactiveFlags.RAW 判断是否被代理过了）
+  // 特例：如果一个对象是普通代理对象（reactive 创建的），但是现在要变成 readonly，就不能直接返回了
   if (
     target[ReactiveFlags.RAW] &&
     !(isReadonly && target[ReactiveFlags.IS_REACTIVE])
   ) {
     return target
   }
-  // target already has corresponding Proxy
+  // 被代理对象已经有了相应的代理对象，直接返回曾经生成的代理对象。目的是，防止一个 raw 多次调用 reactive
   const existingProxy = proxyMap.get(target)
   if (existingProxy) {
     return existingProxy
   }
-  // only specific value types can be observed.
+  // 只有特定的 value 类型能够被观察到（被标记 __v_skip 或者不可扩展的，都直接返回被代理对象）
   const targetType = getTargetType(target)
   if (targetType === TargetType.INVALID) {
     return target
   }
+  // 创建一个 proxy 代理对象，将被代理对象和代理对象缓存起来，并返回代理对象
   const proxy = new Proxy(
     target,
     targetType === TargetType.COLLECTION ? collectionHandlers : baseHandlers
@@ -236,7 +255,9 @@ export function isProxy(value: unknown): boolean {
   return isReactive(value) || isReadonly(value)
 }
 
+// 如果参数是一个响应式的对象，那么就递归获取原始对象，直到获取到一个不是响应式对象的原始对象为止
 export function toRaw<T>(observed: T): T {
+  // 其实这里的 raw 就是参数的原始对象
   const raw = observed && (observed as Target)[ReactiveFlags.RAW]
   return raw ? toRaw(raw) : observed
 }

@@ -9,11 +9,11 @@
   <body>
     <div></div>
     <script>
-      const { reactive, effect } = Vue
-
-      const state = reactive({
+      const { reactive, effect, toRaw, markRaw, isReactive, ref } = Vue
+      const raw = {
         count: 66
-      })
+      }
+      const state = reactive(raw)
 
       effect(() => {
         document.querySelector('div').textContent = `数字是 ${state.count}`
@@ -22,6 +22,20 @@
       setTimeout(() => {
         state.count = 88
       }, 3000)
+
+      // 获取原始对象
+      // console.log(state.__v_raw === raw) // true
+      // console.log(toRaw(state) === raw) // true
+
+      // 测试 markRaw
+
+      const raw1 = { count: 100 }
+      markRaw(raw1)
+      // console.log(raw1.__v_skip) // true
+      // console.log(isReactive(reactive(raw1))) // false
+
+      const test = reactive([ref(1), ref(2), ref(3)])
+      console.log(test[0])
     </script>
   </body>
 </html>
