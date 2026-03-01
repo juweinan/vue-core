@@ -18,6 +18,11 @@ type TrackedMarkers = {
   n: number
 }
 
+/**
+ * 创建一个 dep 依赖收集容器
+ * @param effects 
+ * @returns 
+ */
 export const createDep = (effects?: ReactiveEffect[]): Dep => {
   const dep = new Set<ReactiveEffect>(effects) as Dep
   dep.w = 0
