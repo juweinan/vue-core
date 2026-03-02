@@ -157,10 +157,15 @@ export class ReactiveEffect<T = any> {
   }
 }
 
+/**
+ * 清除 effect 观察的属性依赖
+ * @param effect 
+ */
 function cleanupEffect(effect: ReactiveEffect) {
   const { deps } = effect
   if (deps.length) {
     for (let i = 0; i < deps.length; i++) {
+      // 删除 effect 方法中，观察的属性里面跟自己相关的依赖
       deps[i].delete(effect)
     }
     deps.length = 0
@@ -314,7 +319,8 @@ export function trackEffects(
   if (shouldTrack) {
     // 将 activeEffect 收集起来
     dep.add(activeEffect!)
-    // 这里还有个双向收集（理由是什么？？？）
+    // effect 函数还要收集他里面所观察到的属性对应的依赖集合
+    // 方便在 effect 被 stop 或者组件被销毁时，能够更方便的找到 dep 并在 key 的依赖集合中删除
     activeEffect!.deps.push(dep)
     if (__DEV__ && activeEffect!.onTrack) {
       activeEffect!.onTrack({
@@ -351,6 +357,9 @@ export function trigger(
     return
   }
 
+  // 宏观理解，下面这大段判断逻辑，都是为了精准找到应该触发的依赖
+  // 而且，显式的修改一个属性，还会导致某些属性的隐式修改
+  // 比如 arr.push(item)，除了新增 item，还会修改 length 属性
   let deps: (Dep | undefined)[] = []
   if (type === TriggerOpTypes.CLEAR) {
     // 集合（Map、Set）被清空了，应该执行数据的值对应的所有 effect
@@ -413,6 +422,7 @@ export function trigger(
       }
     }
   } else {
+    // 这种情况肯定是，一个修改隐式的触发了其他属性的修改，所以 deps 就会存在多个
     const effects: ReactiveEffect[] = []
     // 当前修改，肯定是影响到了多个数据的结果（比如数组的批量操作）
     for (const dep of deps) {
@@ -425,6 +435,9 @@ export function trigger(
     if (__DEV__) {
       triggerEffects(createDep(effects), eventInfo)
     } else {
+      // 这里将新的 dep 在创建成 Set 去重
+      // 因为有可能一个 effect 即依赖了 arr[i] 又依赖了 length，这时候只保留一个 effect 就行
+      // 因为这个 effect 执行一次就够了
       triggerEffects(createDep(effects))
     }
   }
@@ -463,7 +476,10 @@ function triggerEffect(
   effect: ReactiveEffect,
   debuggerEventExtraInfo?: DebuggerEventExtraInfo
 ) {
-  // 为什么 effect 不能等于 activeEffect ???
+  // 防止死循环
+  // 因为在 effect 中，很可能出现同时针对这一个属性的修改和访问
+  // 所以说，在 Vue 的 effect 中，自己修改了自己引用的值，就不会再成功 trigger 了，不然就会无限循环下去了
+  // 但是如果就是要能触发，那么就传递 allowRecurse 属性
   if (effect !== activeEffect || effect.allowRecurse) {
     if (__DEV__ && effect.onTrigger) {
       effect.onTrigger(extend({ effect }, debuggerEventExtraInfo))
