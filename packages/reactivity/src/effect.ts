@@ -91,11 +91,12 @@ export class ReactiveEffect<T = any> {
     public scheduler: EffectScheduler | null = null,
     scope?: EffectScope
   ) {
+    // 收集 effect，方便统一销毁（2026-03-02）
     recordEffectScope(this, scope)
   }
 
   run() {
-    // 默认 active 是 true，所以这里无需返回（不知道是在干嘛）
+    // 他是 effect 的生死开关（2026-03-02）
     if (!this.active) {
       return this.fn()
     }
@@ -108,12 +109,13 @@ export class ReactiveEffect<T = any> {
       parent = parent.parent
     }
     try {
-      // 缓存上一个 effect 到实例的 parent 属性上（不知道是在干嘛）
+      // 为了支持 effect 嵌套 effect 的情况，没有它，内层跑完了外层就找不到自己了（2026-03-02）
       this.parent = activeEffect
       // 将当前的 effect 实例对象添加到 activeEffect 上
       activeEffect = this
       shouldTrack = true
 
+      // 黑科技，同下
       trackOpBit = 1 << ++effectTrackDepth
 
       if (effectTrackDepth <= maxMarkerBits) {
@@ -124,6 +126,7 @@ export class ReactiveEffect<T = any> {
       // 返回 effect 方法接收的 fn 的执行结果
       return this.fn()
     } finally {
+      // 黑科技，为了提速，在 Vue3.2 之前没有，程序也可以运行，就是比较卡（2026-03-02）
       if (effectTrackDepth <= maxMarkerBits) {
         finalizeDepMarkers(this)
       }
@@ -192,9 +195,12 @@ export function effect<T = any>(
   fn: () => T,
   options?: ReactiveEffectOptions
 ): ReactiveEffectRunner {
-  // 如果接受的 fn 的一个对象，并且存在 effect 属性（可不考虑）
+  // 这里存在的情况是，如果 effect 接收的 fn 是一个 effect 返回值，也就是当前方法最下面的 runner 对象
+  // const runner1 = effect(() => console.log('hi'))
+  // const runner2 = effect(runner1)
   if ((fn as ReactiveEffectRunner).effect) {
-    // 那么 fn 就等于 effect.fn，这说明 effect 也是一个对象
+    // fn 其实就是 runner，相当于 runner.effect = _effect，然后再获取实例的 fn，也就是原生的方法
+    // 所以即使传进来的是一个 runner，那么也要根据最开始的 fn 创建新的 _effect
     fn = (fn as ReactiveEffectRunner).effect.fn
   }
 
@@ -211,6 +217,9 @@ export function effect<T = any>(
     _effect.run()
   }
   const runner = _effect.run.bind(_effect) as ReactiveEffectRunner
+  // 返回的这个 runner 其实就是当前的 _effect.run
+  // 除此之外还包含了当前 _effect 实例
+  // 可以让开发者直接调用 runner 执行 run 方法，或者通过 runner.effect.stop() 停止当前依赖收集
   runner.effect = _effect
   return runner
 }
