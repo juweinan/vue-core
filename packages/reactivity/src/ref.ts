@@ -36,7 +36,8 @@ type RefBase<T> = {
 export function trackRefValue(ref: RefBase<any>) {
   // 如果应该收集（参考操作数组的逻辑），或者有副作用函数在使用 ref 对象
   if (shouldTrack && activeEffect) {
-    // ref 执行 toRaw 是不是返回的还是自己？？？因为 Ref 对象没有 __v_raw 属性
+    // 其实这里主要的目的就是为了解构 reactive 类型的数据，比如说 reactive(ref(0))
+    // 只是为了能拿到最终的 Ref 类型的数据
     ref = toRaw(ref)
     if (__DEV__) {
       trackEffects(ref.dep || (ref.dep = createDep()), {
@@ -127,6 +128,9 @@ class RefImpl<T> {
    * 当前 ref 实例所收集的所有
    */
   public dep?: Dep = undefined
+  /**
+   * 用于标记这是一个 Ref 对象
+   */
   public readonly __v_isRef = true
 
   constructor(value: T, public readonly __v_isShallow: boolean) {
