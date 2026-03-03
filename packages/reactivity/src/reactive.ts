@@ -269,6 +269,11 @@ export function markRaw<T extends object>(
   return value
 }
 
+/**
+ * 如果 value 是对象，将 value 转为 reactive 对象，否则就使用 value
+ * @param value 
+ * @returns 
+ */
 export const toReactive = <T extends unknown>(value: T): T =>
   isObject(value) ? reactive(value) : value
 

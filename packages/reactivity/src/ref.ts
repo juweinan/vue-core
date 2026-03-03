@@ -29,8 +29,14 @@ type RefBase<T> = {
   value: T
 }
 
+/**
+ * 收集 ref 依赖，接收的参数是被收集的 Ref 实例
+ * @param ref
+ */
 export function trackRefValue(ref: RefBase<any>) {
+  // 如果应该收集（参考操作数组的逻辑），或者有副作用函数在使用 ref 对象
   if (shouldTrack && activeEffect) {
+    // ref 执行 toRaw 是不是返回的还是自己？？？因为 Ref 对象没有 __v_raw 属性
     ref = toRaw(ref)
     if (__DEV__) {
       trackEffects(ref.dep || (ref.dep = createDep()), {
@@ -39,11 +45,19 @@ export function trackRefValue(ref: RefBase<any>) {
         key: 'value'
       })
     } else {
+      // 获取或者初始化一个 dep 集合，并赋值给 ref 实例对象
+      // 然后开始追踪依赖
+      // 正向是 ref.dep 收集 effect；反向是 effect 收集 ref.dep
       trackEffects(ref.dep || (ref.dep = createDep()))
     }
   }
 }
 
+/**
+ * 触发 Ref 类型的依赖
+ * @param ref
+ * @param newVal
+ */
 export function triggerRefValue(ref: RefBase<any>, newVal?: any) {
   ref = toRaw(ref)
   if (ref.dep) {
@@ -55,6 +69,7 @@ export function triggerRefValue(ref: RefBase<any>, newVal?: any) {
         newValue: newVal
       })
     } else {
+      // 触发依赖
       triggerEffects(ref.dep)
     }
   }
@@ -62,6 +77,7 @@ export function triggerRefValue(ref: RefBase<any>, newVal?: any) {
 
 export function isRef<T>(r: Ref<T> | unknown): r is Ref<T>
 export function isRef(r: any): r is Ref {
+  // 有 __v_isRef 属性并且值为 true 就代表是 Ref 类型的数据
   return !!(r && r.__v_isRef === true)
 }
 
@@ -71,6 +87,7 @@ export function ref<T extends object>(
 export function ref<T>(value: T): Ref<UnwrapRef<T>>
 export function ref<T = any>(): Ref<T | undefined>
 export function ref(value?: unknown) {
+  // 调用 ref 方法等于直接调用 createRef 方法
   return createRef(value, false)
 }
 
@@ -87,10 +104,18 @@ export function shallowRef(value?: unknown) {
   return createRef(value, true)
 }
 
+/**
+ * 创建 ref 对象
+ * @param rawValue ref 接收的值
+ * @param shallow 是否是浅层 ref
+ * @returns
+ */
 function createRef(rawValue: unknown, shallow: boolean) {
+  // 如果传进来的本身就是个 ref 类型的数据，那么直接返回
   if (isRef(rawValue)) {
     return rawValue
   }
+  // 返回 RefImpl 实例对象
   return new RefImpl(rawValue, shallow)
 }
 
@@ -98,24 +123,41 @@ class RefImpl<T> {
   private _value: T
   private _rawValue: T
 
+  /**
+   * 当前 ref 实例所收集的所有
+   */
   public dep?: Dep = undefined
   public readonly __v_isRef = true
 
   constructor(value: T, public readonly __v_isShallow: boolean) {
+    // 保存原始对象
     this._rawValue = __v_isShallow ? value : toRaw(value)
+    // 拿到响应式对象或者原始值
     this._value = __v_isShallow ? value : toReactive(value)
   }
 
+  /**
+   * 通过实例对象的 value 属性访问属性值（这也就是为什么要通过 ref.value 访问结果了）
+   */
   get value() {
+    // 访问属性值时，直接收集 ref 依赖
+    // 这里是直接收集整个 ref 的依赖，如果 ref 的 value 是个对象，那么访问对象的属性还是通过 proxy 的 getter 收集
     trackRefValue(this)
     return this._value
   }
 
+  /**
+   * 通过 ref.value 修改新的属性值
+   */
   set value(newVal) {
+    // 拿到新的值的原始值
     newVal = this.__v_isShallow ? newVal : toRaw(newVal)
+    // 判断数据是否发生了改变
     if (hasChanged(newVal, this._rawValue)) {
+      // 如果改变了，就修改数据
       this._rawValue = newVal
       this._value = this.__v_isShallow ? newVal : toReactive(newVal)
+      // 触发 Ref 依赖
       triggerRefValue(this, newVal)
     }
   }
