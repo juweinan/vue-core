@@ -1,80 +1,179 @@
-关于 computed 的源码阅读，只能说读懂了一半，但是还有个很重要的问题没有读懂
+```html
+<div id="app"></div>
 
-首先，关于 computed 方法，源码中使用了函数重载的方式，对于接受的参数做一下兼容
+<script>
+  const { reactive, computed, effect } = Vue
 
-- 直接收一个 getter 方法
-- 接受一个可写入的对象选项，选项中要有 get 和 set 方法
+  const son = reactive({
+    firstName: 'wang',
+    lastName: 'daxun'
+  })
 
-在 computed 的方法内部，首先判断参数是否是一个函数类型
+  const fullName = computed(() => {
+    return son.firstName + son.lastName
+  })
 
-- 如果是函数，那么就直接当作 getter 方法实用，然后创建一个空的，执行没有任何意义的方法作为 setter
-- 如果不是函数，那么就把 get 和 set 分别作为 getter 和 setter 实用
+  effect(() => {
+    document.querySelector('#app').innerText = fullName.value
+  })
 
-创建一个 ComputedRefImpl 实例，将 getter 和 setter 传进去
+  setTimeout(() => {
+    son.lastName = 'genji'
+  })
+</script>
+```
 
-最后返回这个实例对象，至此 computed 方法实现完毕，这里没有什么难点
+逐行分析上面的代码...
 
-接下来看 ComputedRefImpl 构造函数
+reactive 这里不过多赘述，这里主要关注创建 target 的 getter/setter。
 
-在构造函数中，直接将 getter 作为 ReactiveEffect 中的 fn 参数，创建一个 effect 实例，并放到自身的实例对象属性上，同时还传递了第二个参数，是一个方法，这是一个 scheduler 方法，用于判断在什么时候调用的
+### computed 源码
 
-然后将 this 绑定到 effect 实例对象上，不考虑服务器渲染的话，active 肯定是 true
+下面执行 computed 方法，这里就进入到了本章的重点！！！
 
-这个时候构造函数已经执行完毕了，但是有个注意的点，因为 effect 只完成了实例化，没有调用 run 方法，所以这是 this.effect 并不等于 activeEffect
-还有这个参数 scheduler 也并没有被执行。
+```ts
+export function computed<T>(
+  getterOrOptions: ComputedGetter<T> | WritableComputedOptions<T>
+) {
+  const onlyGetter = isFunction(getterOrOptions)
+  if (onlyGetter) {
+    getter = getterOrOptions
+    setter = () => {}
+  } else {
+    getter = getterOrOptions.get
+    setter = getterOrOptions.set
+  }
 
-下面，我们假设存在一下业务代码
+  const cRef = new ComputedRefImpl(getter, setter)
 
-```js
+  return cRef
+}
+```
+
+在 computed 方法的源码实现中：
+
+- 首先判断 computed 自身接受的参数是对象还是函数，如果是函数，则默认创建一个空的 setter，否则的话，就存储对象中的 get/set。
+- 创建一个 ComputedRefImpl 实例并返回。
+
+### ComputedRefImpl 源码
+
+```ts
+export class ComputedRefImpl<T> {
+  public readonly effect: ReactiveEffect<T>
+
+  public readonly __v_isRef = true
+
+  constructor(
+    getter: ComputedGetter<T>,
+    private readonly _setter: ComputedSetter<T>,
+    isReadonly: boolean,
+    isSSR: boolean
+  ) {
+    this.effect = new ReactiveEffect(getter, () => {
+      if (!this._dirty) {
+        this._dirty = true
+        triggerRefValue(this)
+      }
+    })
+    this.effect.computed = this
+  }
+}
+```
+
+因为在 computed 中，只是实例化了 ComputedRefImpl，所以这里只看构造函数中的代码。
+
+- 实例化了 ReactiveEffect，得到一个 effect，下面都称为 cRefEffect，并作为 cRef.effect（实例属性）
+- getter 函数作为 cRefEffect 的 fn 实例属性
+- 这里面还传递了一个 scheduler 调度器函数，函数中的具体实现暂时可以不看
+- 给这个 cRefEffect 标记为是一个计算属性类型
+
+```ts
+// cRef.effect.fn 指向的方法是：
+;() => {
+  return son.firstName + son.lastName
+}
+```
+
+这里有一个要注意的点，那就是 并没有执行 cRefEffect.run()，所以 activeEffect 还是空的。
+至此，computed 执行结束。
+
+```ts
 effect(() => {
-  console.log(computedRef.value)
+  document.querySelector('#app').innerText = fullName.value
 })
 ```
 
-因为执行 effect 方法，本身就会创建 \_effect 实例，并执行 run，所以这里的 activeEffect 指向的是业务代码 effect 创建的 \_effect 实例，而非构造函数中的 this.effect，
+执行业务代码 effect，在源码中也是创建一个 \_effect 实例（下面用 bizEffect 表示），执行 run 方法。这时候的 activeEffect 等于 bizEffect，执行 effect 中的 fn，开始访问计算属性 fullName.value。
 
-然后执行 computedRef.value，就会走到构造函数中的 get value 中，开始将 computedRefImpl 实例对象中的 dep 和 activeEffect 双向收集（原因之前提过很多次，这里不赘述）
+关于 fullName.value 的实现，可以看 ComputedRefImpl 中的 get 方法。
 
-依赖收集完成之后，因为 \_dirty 默认就是 true，所以能执行到判断条件里，然后将 \_dirty 置为 false，
-执行 this.effect.run()，这时候 run 中的 this.parent 在我的学习中第一次用到了，我猜测这个应该是用于存储业务中 effect 方法 activeEffect，
-因为执行了 this.effect.run，所以这时的 activeEffect 指向的就是 this.effect 了，然后，因为执行了并返回 fn
+```ts
+export class ComputedRefImpl<T> {
+  public dep?: Dep = undefined
 
-这时候的 fn 是什么，其实是 computed 中的 getter
+  private _value!: T
 
-```js
-const user = reactive({
-  firstName: 'wang',
-  lastName: 'genji'
-})
+  public _dirty = true
 
-const computedRef = computed(() => {
-  return user.firstName + user.lastName
-})
+  get value() {
+    const self = toRaw(this)
+    trackRefValue(self)
+    if (self._dirty || !self._cacheable) {
+      self._dirty = false
+      self._value = self.effect.run()!
+    }
+    return self._value
+  }
+}
 ```
 
-这个时候执行 getter 就是跟 reactive 相关的依赖收集了，只不过 reactive 收集的依赖其实是 computedRef 中的 this.effect。
-同样的 this.effect 也会收集这两个属性
+首先执行 toRaw 拿到原生的计算属性，这步应该是跟 Ref 一样，防止被 reactive 嵌套。
 
-执行完了 fn，返回值添加到 self.\_value 上缓存起来。至此 effect 执行结束
+开始收集依赖。这时的 activeEffect 是什么，是上面提到的 bizEffect。然后双向收集的过程是 cRef.dep 和 bizEffect 的之间收集。
 
-这里顺便提一下，计算属性中的 set 方法，其实就是执行了传入的 set 方法，他不影响计算属性自身中的任何功能
-set 方法中写了什么，都是完全独立于 computed 的另外一套 getter/setter，track/trigger 等
+因为在实例化的时候，\_dirty 默认是 true，所以进入判断条件，将 \_dirty 设置为 false。执行 cRef.effect.run()，这个时候 activeEffect 指向的是 cRefEffect，然后执行 cRefEffect.fn，也就是计算属性中的 getter 方法。
+
+```ts
+;() => {
+  return son.firstName + son.lastName
+}
+```
+
+这个时候，因为访问了 reactive 的属性，所以触发了 proxy.getter，然后 target.key 跟 cRefEffect 之间的相互依赖收集。最后将返回值存储在 cRef.\_value 属性上并返回。至此，业务代码中的 effect 执行完毕。
+
+在执行业务 effect 的过程中，一共触发了两次依赖收集：
+
+1. 在 \_effect.run() 时，完成了 bizEffect 和 cRef.dep 之间的相互收集
+2. 在 self.effect.run() 时，完成了 cRefEffect 和 targetMap 的 key 之间的相互收集
+
+关于 \_dirty 属性的解释：
+
+可以理解为默认数据就是脏的，当第一次访问完了之后，得到 \_value，就认为数据不是脏的了。那么下次在访问的时候，发现数据是干净的，就直接从缓存中读取了，而无需重新计算。
 
 ```ts
 setTimeout(() => {
-  user.lastName = 'daxun'
+  son.lastName = 'genji'
 })
 ```
 
-这个时候，触发了 proxy 中的 setter，然后开始 trigger，这时候 trigger 的 effect 是什么，其实是 computedRef 中的 this.effect，执行 run 方法等于执行了 computed 中的 getter，也就是 user.firstName + user.lastName
+执行 proxy.setter，因为 proxy.key 是在 computed 中的 getter 访问的，所以这时候触发的依赖应该是 ComputedRefImpl 中构造函数创建的 effect，也就是 cRefEffect。
 
-不过这个时候 trigger 流程中的 triggerEffects 会进入到 if (effect.computed) 的逻辑里，而且这个 effect.computed 就是计算属性实例，但是这里的源码好想写的比较冗余
+回看一下这个 effect 长什么样
 
 ```ts
-export function triggerEffects(
-  dep: Dep | ReactiveEffect[],
-  debuggerEventExtraInfo?: DebuggerEventExtraInfo
-) {
+this.effect = new ReactiveEffect(getter, () => {
+  if (!this._dirty) {
+    this._dirty = true
+    triggerRefValue(this)
+  }
+})
+this.effect.computed = this
+```
+
+有 fn、schduler、computed 这几个属性。那么就来看看 trigger 方法中是怎么执行的吧
+
+```ts
+export function triggerEffects(dep: Dep | ReactiveEffect[]) {
   const effects = isArray(dep) ? dep : [...dep]
   for (const effect of effects) {
     if (effect.computed) {
@@ -89,13 +188,39 @@ export function triggerEffects(
 }
 ```
 
-因为不管是不是存在 computed 属性，都是进入到了 triggerEffect 方法，不过在这个方法中，别有洞天
+这里执行是有个优先级的，关于 computed 类型的 effect 要优先执行，然后再执行普通的 effect。
+
+为什么要这么处理呢？
 
 ```ts
-function triggerEffect(
-  effect: ReactiveEffect,
-  debuggerEventExtraInfo?: DebuggerEventExtraInfo
-) {
+const count = ref(0)
+const double = computed(() => count.value * 2)
+
+effect(() => {
+  console.log(count.value, double.value)
+})
+
+setTimeout(() => {
+  count.value++
+})
+```
+
+在上面的测试代码中，effect 同时依赖了 count.value，和 double.value。
+当执行 count.value++ 的时候，count 收集起来的 effect 一共有两个：
+
+1. double 内部的 effect => cRefEffect
+2. 业务代码中的 effect => bizEffect
+
+如果没有优先执行 computed 的 effect：
+先执行了 bizEffect，那么这时候得到的 double.value 就是旧的值，随后才执行 cRefEffect。
+
+有了双循环：
+就能保证先触发计算属性的 effect，然后再触发业务 effect，这样就能保证都能拿到最新的值了。
+
+所以回到正题，弄明白了为什么要先执行 computed 类型的 effect，继续看 triggerEffect
+
+```ts
+function triggerEffect(effect: ReactiveEffect) {
   if (effect !== activeEffect || effect.allowRecurse) {
     if (effect.scheduler) {
       effect.scheduler()
@@ -106,7 +231,7 @@ function triggerEffect(
 }
 ```
 
-因为 computed 在实例化的时候，创建的 effect 中传入了 scheduler，所以就开始执行 scheduler
+因为当前触发的是 cRefEffect 有 scheduler 属性，所以执行他
 
 ```ts
 ;() => {
@@ -117,21 +242,16 @@ function triggerEffect(
 }
 ```
 
-这个时候，this.\_dirty = false，因为在第一次访问这个属性的时候，就把它设置为 false 了，然后再设置为 true，开始触发依赖
+因为此时的 _dirty 是 false，所以能进入判断条件，标记一下数据已经脏了（但是这里并没有计算新的数据哦），然后触发依赖。
 
-看到这里，就知道计算属性到底是怎么缓存的了，他的实现思路就是，在第一次访问这个计算属性的时候，他通过开关 \_dirty 用于判断是否之前访问过了，
-没访问过，那么就执行 get 拿到结果缓存，并标记结果已经访问过了，然后后面在访问这个属性的时候（假如中间没有修改过），发现之前计算过了，就直接那前面的结果返回
-从而达到了缓存的目的
+这时触发的依赖又是什么呢？effect 存在于 cRef.dep 中，所以触发的是 bizEffect，这是一个普通 effect，执行 run 方法，其实这个时候已经回到了第一次执行业务代码 effect 的源码逻辑了。
 
-然后修改了一次，进入到 scheduler，标记为没访问过（或者说这个缓存失效了更合理），然后开始触发依赖。
+activeEffect 又等于 bizEffect 了，然后执行 fn，开始访问计算属性的 getter。
 
-这时候又要问了，触发的是什么依赖呢，讲着讲着我自己也懵了，我理一下。。。
+首先开始收集依赖，是 cRef.dep 跟 bizEffect 之间的双向收集。继续执行，因为在 scheduler 中已经标记了数据脏了，需要重新计算，所以这里执行 self.effect.run()，然后 activeEffect 又等于 cRefEffect，执行 fn，也就是 computed 方法中传入的 get 方法。
 
-这个时候触发的是 computed 实例的 effect，实例的 dep 中收集的是哪个 effect 呢，很明显是业务代码中的 effect，因为是这个函数中访问了计算属性
-（这里忽然想明白，也是想到了，依赖的属性和副作用函数的关系，就是函数中用到了谁，那就跟谁关联）
+这时候又开始访问 proxy.getter，完成 targetMap.key 跟 cRefEffect 之间的双向收集，并计算出新的计算属性结果，缓存、返回、标记数据是干净的（_dirty = false）。
 
-然后触发 trigger 就不会进入 scheduler 条件了，而是直接执行 run 方法，打印 计算属性的结果
+然后 effect 执行完成，页面更新了。
 
-至此整个流程完成完整闭环
-
-在整理的过程中，突然理通了我开头提到的一些疑惑，不过有个问题，就是 effect 中的 this.parent 好想并没有在这里使用到。
+至此整个流程已经结束了。
