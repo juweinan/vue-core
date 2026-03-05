@@ -454,7 +454,8 @@ export function triggerEffects(
 ) {
   // 将集合扩展成普通数组
   const effects = isArray(dep) ? dep : [...dep]
-  // 执行数据变化后，需要重新运行的 effectFn，不过要区分是否是 computed
+  // 先执行 computed 类型的 effect
+  // 原因可以看 docs/reactivity/07-computed.md 文件
   for (const effect of effects) {
     if (effect.computed) {
       triggerEffect(effect, debuggerEventExtraInfo)
@@ -484,6 +485,7 @@ function triggerEffect(
     if (__DEV__ && effect.onTrigger) {
       effect.onTrigger(extend({ effect }, debuggerEventExtraInfo))
     }
+    // 计算属性中用到了，如果存在这个属性，则执行这个属性
     if (effect.scheduler) {
       effect.scheduler()
     } else {

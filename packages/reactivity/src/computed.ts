@@ -33,15 +33,23 @@ export class ComputedRefImpl<T> {
    */
   public dep?: Dep = undefined
 
+  /**
+   * 被缓存起来的计算属性
+   */
   private _value!: T
   /**
-   * 将计算属性中的 getter 作为 effect.fn 实例化了
+   * 存在 fn 属性，对应的是 computed 方法传入的 get
+   * 存在 scheduler 属性，对应的是构造函数中定义的方法，作用就是标记数据已经脏了，并且触发依赖（监听了计算属性的所有副作用函数）
+   * 存在 computed 属性
    */
   public readonly effect: ReactiveEffect<T>
 
   public readonly __v_isRef = true
   public readonly [ReactiveFlags.IS_READONLY]: boolean
 
+  /**
+   * 数据是否脏了，脏了的话就需要重新计算而不是取 _value
+   */
   public _dirty = true
   public _cacheable: boolean
 
@@ -51,14 +59,20 @@ export class ComputedRefImpl<T> {
     isReadonly: boolean,
     isSSR: boolean
   ) {
-    // 将 getter 作为副作用函数，创建 _effect 实例，并存储在 ComputedRefImpl 实例对象上
-    // 参数二是一个 scheduler，用于处理什么时候开始执行触发依赖的逻辑
+    // 将 computed 中传入的 get 方法作为 fn，传入 scheduler 方法
     this.effect = new ReactiveEffect(getter, () => {
+      // scheduler 实现中，如果数据不是脏的，那么就让数据标记为脏的，然后触发依赖
+      // 触发的依赖是监听了当前计算属性的所有副作用函数
+      // 这样执行对应的 effect.fn 就会进入计算属性的 getter 了
       if (!this._dirty) {
         this._dirty = true
+        // 这里触发的依赖是监听了计算属性的 effect，然后执行 fn 有进入到了 get value
+        // 然后 _dirty 已经设置为 false 了，开始计算新的值
+        // 但是计算新的值，是当触发的 effect.fn 里面访问了计算属性，才开始计算的，而不是执行了 scheduler 就已经计算了
         triggerRefValue(this)
       }
     })
+    // 把当前 effect 标记为 computed
     this.effect.computed = this
     this.effect.active = this._cacheable = !isSSR
     this[ReactiveFlags.IS_READONLY] = isReadonly
@@ -67,14 +81,17 @@ export class ComputedRefImpl<T> {
   get value() {
     // the computed ref may get wrapped by other proxies e.g. readonly() #3376
     const self = toRaw(this)
-    // 访问计算属性时，开始收集依赖，不过这里收集的并不是构造函数中创建的 effect，因为那里并没有执行 run，所以 activeEffect 也不是 this.effect
+    // 访问 cRef.value，开始收集依赖。如果是副作用函数访问了 cRef.value，那么 activeEffect 就是这个副作用函数
+    // 这里是 cRef.dep 和监听了 cRef.value 的 effect 之间相互收集
     trackRefValue(self)
-    // 第一次是 _dirty = true，所以可以进入
+    // 第一次或者执行过了 scheduler 后是 _dirty = true，所以可以进入
     if (self._dirty || !self._cacheable) {
       // 修改 _dirty 为 false
       self._dirty = false
-      // 获取 getter 的结果，这里的返回值其实就是 computed 中 get 方法的返回值
-      // 同时这个操作修改了 activeEffect 为 this.effect
+      // 执行 cRef.effect.run()，这时的 activeEffect 就是 cRef.effect，fn 就是 computed 传入的 get 方法
+      // 在 get 方法中有访问了什么值，那就是那些值和 cRef.effect 之间相互收集依赖了
+      // 这里收集起来的 effect 可是带有 computed 和 scheduler 属性的
+      // 得到结果，缓存起来，并返回
       self._value = self.effect.run()!
     }
     // 返回结果
