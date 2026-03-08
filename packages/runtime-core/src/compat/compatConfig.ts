@@ -621,6 +621,7 @@ export function softAssertCompatEnabled(
  * Use this for features with the same syntax but with mutually exclusive
  * behavior in 2 vs 3. Only warn if compat is enabled.
  * e.g. render function
+ * 用于区分 Vue2 和 Vue3 的，而且只有在开启 compat 的情况下才有效
  */
 export function checkCompatEnabled(
   key: DeprecationTypes,

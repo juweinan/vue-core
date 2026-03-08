@@ -59,6 +59,15 @@ export const ErrorTypeStrings: Record<number | string, string> = {
 
 export type ErrorTypes = LifecycleHooks | ErrorCodes
 
+/**
+ * 执行方法，并返回值，如果方法执行的过程中报错了，内部会自动捕获
+ * 这里的 fn 执行后，返回的不是一个 promise
+ * @param fn 同步方法
+ * @param instance 
+ * @param type 
+ * @param args 
+ * @returns 
+ */
 export function callWithErrorHandling(
   fn: Function,
   instance: ComponentInternalInstance | null,
@@ -74,6 +83,14 @@ export function callWithErrorHandling(
   return res
 }
 
+/**
+ * 执行方法，并返回结果，这个方法返回的是 promise
+ * @param fn 
+ * @param instance 
+ * @param type 
+ * @param args 
+ * @returns 
+ */
 export function callWithAsyncErrorHandling(
   fn: Function | Function[],
   instance: ComponentInternalInstance | null,
