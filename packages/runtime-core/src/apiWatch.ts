@@ -410,8 +410,9 @@ function doWatch(
     scheduler = () => queuePostRenderEffect(job, instance && instance.suspense)
   } else {
     // default: 'pre' 在组件更新前执行
-    // 默认情况下，scheduler 调度器会被包装成微任务，在执行的时候会放到微任务队列
-    // 从而达到异步调用的目的
+    // 这一步并不会直接执行 job，而是将 job 添加到任务队列中
+    // 然后对创建一个状态是 fulfilled 状态 promise，在 promise 的回调中会执行所有的 job
+    // 在 then 的回调方法中，会对 job 进行去重
     scheduler = () => queuePreFlushCb(job)
   }
 

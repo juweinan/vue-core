@@ -111,9 +111,15 @@ export function queueJob(job: SchedulerJob) {
   }
 }
 
+/**
+ * 创建一个 promise，并在 then 的回调中执行所有的 job
+ * 这个方法执行完后，watcher 中的 scheduler 就已经执行完毕了
+ */
 function queueFlush() {
+  // 标记为队列中存在待执行的任务（这步的目的是，只创建一个 promise）
   if (!isFlushing && !isFlushPending) {
     isFlushPending = true
+    // 这里执行使用 promise 包装一下，then 的回调函数就是 flushJobs
     currentFlushPromise = resolvedPromise.then(flushJobs)
   }
 }
@@ -145,6 +151,7 @@ function queueCb(
       !activeQueue.includes(cb, cb.allowRecurse ? index + 1 : index)
     ) {
       // 没有正在执行的任务，或者正在执行的任务中没有当前任务，则添加进去
+      // 这一步的验证是，防止在执行 job 的时候触发了更新，这种情况下并不会无限循环执行
       pendingQueue.push(cb)
     }
   } else {
@@ -173,13 +180,25 @@ export function queuePostFlushCb(cb: SchedulerJobs) {
   queueCb(cb, activePostFlushCbs, pendingPostFlushCbs, postFlushIndex)
 }
 
+/**
+ * 处理 pre 类型的 watcher callback
+ * @param seen 
+ * @param parentJob 
+ */
 export function flushPreFlushCbs(
   seen?: CountMap,
   parentJob: SchedulerJob | null = null
 ) {
+  // 判断待办任务列表中是否存在任务，整个待办任务就是 scheduler 中添加的 job 队列
   if (pendingPreFlushCbs.length) {
+    // 指向的是第一个任务，被 promise 后的返回值
     currentPreFlushParentJob = parentJob
+    // 将待办任务去重，并赋值给 activePreFlushCbs
+    // 除了去重，应该还是有为了防止在执行 cb 的时候，又更新了 pendingPreFlushCbs，导致无限循环
+    // 这也就是为什么，当连续多次修改 watch 依赖的属性时，watch 只执行一次
+    // 至于为什么执行一次能拿到最新的结果，那是因为前面包装成了 promise
     activePreFlushCbs = [...new Set(pendingPreFlushCbs)]
+    // 然后清空待办任务
     pendingPreFlushCbs.length = 0
     if (__DEV__) {
       seen = seen || new Map()
@@ -195,6 +214,7 @@ export function flushPreFlushCbs(
       ) {
         continue
       }
+      // 遍历并执行当前需要执行的所有 job
       activePreFlushCbs[preFlushIndex]()
     }
     activePreFlushCbs = null
@@ -246,13 +266,20 @@ export function flushPostFlushCbs(seen?: CountMap) {
 const getId = (job: SchedulerJob): number =>
   job.id == null ? Infinity : job.id
 
+/**
+ * watch promise 后，then 中的回调函数
+ * @param seen 
+ */
 function flushJobs(seen?: CountMap) {
+  // 因为已经执行到 then 了，所以可以创建新的 promise 了
+  // 标记为当前没有在执行的代办任务（后面就可以重新添加进去了）
   isFlushPending = false
   isFlushing = true
   if (__DEV__) {
     seen = seen || new Map()
   }
 
+  // 执行 pre 类型的 watch cb（需要在组件更新前就执行的 watch）
   flushPreFlushCbs(seen)
 
   // Sort queue before flush.
