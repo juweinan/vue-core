@@ -359,13 +359,14 @@ function doWatch(
     // 如果 watch 中传递了 cb
     if (cb) {
       // watch(source, cb)
-      // 重置 activeEffect，然后执行 effect.fn 也就是执行上面处理好的 getter
-      // 拿到被监听数据的新的返回值
+      // 这里的代码其实做了两件事儿
+      // 1. 取值，拿到了 source 中最新的值
+      // 2. 续约：更新 activeEffect，执行 fn 后，触发里面属性的 getter，完成 track 任务，保证后面在访问仍然可以关联
       const newValue = effect.run()
       // 1. 如果是深度监听
       // 2. 新的结果和旧的结果确定发生了变化
       if (
-        deep ||
+        deep || // 对于深度监听的，不会走 hasChanged，这是为了当某个属性发生变化，也能通知更新
         forceTrigger ||
         (isMultiSource // 不管是多个还是单个 source，都要判断新的结果和旧的是否发生了变化
           ? (newValue as any[]).some((v, i) =>
@@ -387,6 +388,7 @@ function doWatch(
           oldValue === INITIAL_WATCHER_VALUE ? undefined : oldValue,
           onCleanup
         ])
+        // 更新旧的值
         oldValue = newValue
       }
     } else {
@@ -402,12 +404,12 @@ function doWatch(
   job.allowRecurse = !!cb
 
   let scheduler: EffectScheduler
-  if (flush === 'sync') { // watchSyncEffect
+  if (flush === 'sync') { // watchSyncEffect：数据一变，同步立即执行。会跳过 Vue 的异步队列，及其耗费性能
     scheduler = job as any // the scheduler function gets called directly
-  } else if (flush === 'post') { // watchPostEffect
+  } else if (flush === 'post') { // watchPostEffect：在组件更新后执行
     scheduler = () => queuePostRenderEffect(job, instance && instance.suspense)
   } else {
-    // default: 'pre'
+    // default: 'pre' 在组件更新前执行
     // 默认情况下，scheduler 调度器会被包装成微任务，在执行的时候会放到微任务队列
     // 从而达到异步调用的目的
     scheduler = () => queuePreFlushCb(job)
@@ -444,6 +446,7 @@ function doWatch(
   return () => {
     effect.stop()
     if (instance && instance.scope) {
+      // 对应着 ReactiveEffect 中的 recordEffectScope
       remove(instance.scope.effects!, effect)
     }
   }
