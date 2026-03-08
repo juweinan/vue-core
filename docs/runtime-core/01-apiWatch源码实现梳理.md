@@ -413,6 +413,10 @@ export function flushPreFlushCbs(
 在这个方法中，首先判断 `pendingPreFlushCbs` 是否有值，这个队列就是最开始 `push job` 的数组，然后用 `Set` 完成数组去重，并赋值给 `activePreFlushCbs`。
 清空 `pendingPreFlushCbs` 然后遍历 `activePreFlushCbs` 并执行每一个 `job`。
 
+如果在执行 `job` 的过程中，又产生了新的 `job`，则判断当前执行的 `job` 列表中是否存在相同的 `job`（这种情况通常是 `watch` 中改变了自己监听的属性），如果不存在就添加到待执行任务队列中。
+
+最后当前所有任务执行完毕，再递归执行 `flushPreFlushCbs` 方法，因为在执行 `job` 的过程中，可能产生了新的 `job` 需要执行。
+
 这个时候，虽然改变了三次，但是经过数组去重其实只有一个 `job` 需要执行，又因为这是微任务，所以拿到的 `newValue` 是最终的结果。
 
 这里要说明一下原生的 `effect` 和 `watch` 在这个案例里的不同

@@ -151,7 +151,8 @@ function queueCb(
       !activeQueue.includes(cb, cb.allowRecurse ? index + 1 : index)
     ) {
       // 没有正在执行的任务，或者正在执行的任务中没有当前任务，则添加进去
-      // 这一步的验证是，防止在执行 job 的时候触发了更新，这种情况下并不会无限循环执行
+      // 作用是：防止 job 在执行的时候，产生了同样的新的 job（通常是 watch 的回调函数中修改了被监听的属性）
+      // 但是如果产生的是新 job，则添加到待办任务队列中，因为在当前正在执行的任务队列执行完了，也会把新的 job 执行完
       pendingQueue.push(cb)
     }
   } else {
@@ -194,11 +195,10 @@ export function flushPreFlushCbs(
     // 指向的是第一个任务，被 promise 后的返回值
     currentPreFlushParentJob = parentJob
     // 将待办任务去重，并赋值给 activePreFlushCbs
-    // 除了去重，应该还是有为了防止在执行 cb 的时候，又更新了 pendingPreFlushCbs，导致无限循环
     // 这也就是为什么，当连续多次修改 watch 依赖的属性时，watch 只执行一次
     // 至于为什么执行一次能拿到最新的结果，那是因为前面包装成了 promise
     activePreFlushCbs = [...new Set(pendingPreFlushCbs)]
-    // 然后清空待办任务
+    // 然后清空待办任务，作用是，当执行 activePreFlushCbs 中的 job 时，产生了新的 job，可以继续添加到待办任务队列中
     pendingPreFlushCbs.length = 0
     if (__DEV__) {
       seen = seen || new Map()
@@ -220,7 +220,7 @@ export function flushPreFlushCbs(
     activePreFlushCbs = null
     preFlushIndex = 0
     currentPreFlushParentJob = null
-    // recursively flush until it drains
+    // 因为在执行 job 的时候，可能产生了新的 job 在 pending 队列中，所以需要把产生的 job 也全部执行完
     flushPreFlushCbs(seen, parentJob)
   }
 }
@@ -268,6 +268,7 @@ const getId = (job: SchedulerJob): number =>
 
 /**
  * watch promise 后，then 中的回调函数
+ * 主要执行所有的 job
  * @param seen 
  */
 function flushJobs(seen?: CountMap) {
