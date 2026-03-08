@@ -39,7 +39,13 @@ let isFlushPending = false
 const queue: SchedulerJob[] = []
 let flushIndex = 0
 
+/** 
+ * 理解为待办事项清单
+ */
 const pendingPreFlushCbs: SchedulerJob[] = []
+/**
+ * 正在执行的？
+ */
 let activePreFlushCbs: SchedulerJob[] | null = null
 let preFlushIndex = 0
 
@@ -119,17 +125,26 @@ export function invalidateJob(job: SchedulerJob) {
   }
 }
 
+/**
+ * 将任务添加到待办任务队列中
+ * @param cb 
+ * @param activeQueue 
+ * @param pendingQueue 
+ * @param index 
+ */
 function queueCb(
   cb: SchedulerJobs,
   activeQueue: SchedulerJob[] | null,
   pendingQueue: SchedulerJob[],
   index: number
 ) {
+  // 如果不是数组，需要判断是否有正在执行的任务，或者正在执行的任务中有没有当前任务
   if (!isArray(cb)) {
     if (
       !activeQueue ||
       !activeQueue.includes(cb, cb.allowRecurse ? index + 1 : index)
     ) {
+      // 没有正在执行的任务，或者正在执行的任务中没有当前任务，则添加进去
       pendingQueue.push(cb)
     }
   } else {
@@ -138,13 +153,22 @@ function queueCb(
     // we can skip duplicate check here to improve perf
     pendingQueue.push(...cb)
   }
+  // 开始执行任务
   queueFlush()
 }
 
+/**
+ * 添加默认类型 pre 的 watcher job 到待办任务 pendingPreFlushCbs 中
+ * @param cb 
+ */
 export function queuePreFlushCb(cb: SchedulerJob) {
   queueCb(cb, activePreFlushCbs, pendingPreFlushCbs, preFlushIndex)
 }
 
+/**
+ * 添加 post 类型的 watcher job 到待办任务 pendingPostFlushCbs 中
+ * @param cb 
+ */
 export function queuePostFlushCb(cb: SchedulerJobs) {
   queueCb(cb, activePostFlushCbs, pendingPostFlushCbs, postFlushIndex)
 }
