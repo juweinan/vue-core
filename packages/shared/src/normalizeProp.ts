@@ -62,6 +62,11 @@ export function stringifyStyle(
   return ret
 }
 
+/**
+ * 将 class 样式配置转换成字符串格式，空格分隔
+ * @param value 
+ * @returns 
+ */
 export function normalizeClass(value: unknown): string {
   let res = ''
   if (isString(value)) {

@@ -78,7 +78,8 @@ interface Constructor<P = any> {
 // The following is a series of overloads for providing props validation of
 // manually written render functions.
 
-// element
+// 这里又是对 h 函数的函数重载
+// element 元素标签
 export function h(type: string, children?: RawChildren): VNode
 export function h(
   type: string,
@@ -86,7 +87,7 @@ export function h(
   children?: RawChildren | RawSlots
 ): VNode
 
-// text/comment
+// text/comment 文本或者注释
 export function h(
   type: typeof Text | typeof Comment,
   children?: string | number | boolean
@@ -96,7 +97,7 @@ export function h(
   props?: null,
   children?: string | number | boolean
 ): VNode
-// fragment
+// fragment 文档片段
 export function h(type: typeof Fragment, children?: VNodeArrayChildren): VNode
 export function h(
   type: typeof Fragment,
@@ -104,14 +105,14 @@ export function h(
   children?: VNodeArrayChildren
 ): VNode
 
-// teleport (target prop is required)
+// teleport (target prop is required) teleport 内置组件，用于将元素添加到指定节点上
 export function h(
   type: typeof Teleport,
   props: RawProps & TeleportProps,
   children: RawChildren
 ): VNode
 
-// suspense
+// suspense 异步渲染组件
 export function h(type: typeof Suspense, children?: RawChildren): VNode
 export function h(
   type: typeof Suspense,
@@ -119,7 +120,7 @@ export function h(
   children?: RawChildren | RawSlots
 ): VNode
 
-// functional component
+// functional component 函数式组件
 export function h<P, E extends EmitsOptions = {}>(
   type: FunctionalComponent<P, E>,
   props?: (RawProps & P) | ({} extends P ? null : never),
@@ -170,27 +171,43 @@ export function h<P>(
   children?: RawChildren | RawSlots
 ): VNode
 
-// Actual implementation
+/**
+ * h 函数：主要判断并处理传递进来的参数
+ * 处理成 type, props，children 这种标准的参数
+ * 然后调用 createVNode 方法
+ * @param type vnode 类型
+ * @param propsOrChildren vnode 的属性配置对象或者子节点对象
+ * @param children 子节点
+ * @returns 
+ */
 export function h(type: any, propsOrChildren?: any, children?: any): VNode {
+  // h 函数接收到的参数个数
   const l = arguments.length
+  // 如果只有两个参数（参数二要么是 vnode 类型的子节点，要么是属性配置对象，要么就是其他类型的子节点）
   if (l === 2) {
+    // 如果参数二是对象，但是不是数组
     if (isObject(propsOrChildren) && !isArray(propsOrChildren)) {
-      // single vnode without props
+      // 参数二是个 vnode，说明 type 标签没有任何属性，只有一个子节点
       if (isVNode(propsOrChildren)) {
+        // 创建 vnode
         return createVNode(type, null, [propsOrChildren])
       }
-      // props without children
+      // 如果不是 vnode，说明是 props，则创建 type 的 vnode，并添加 props
       return createVNode(type, propsOrChildren)
     } else {
-      // omit props
+      // 这种情况是，存在第二个参数，但不是对象，说明是个纯文本或者数组，那么就直接创建 type 以及他的子节点的 vnode
       return createVNode(type, null, propsOrChildren)
     }
   } else {
+    // 如果参数个数大于 3 个，则第三个以及后面的，都是 children，并且处理成数组格式
+    // 相当于，当前 type 节点，有多个子节点
     if (l > 3) {
       children = Array.prototype.slice.call(arguments, 2)
+      // 参数等于 3 个，并且 children 还是一个 vnode，处理成数组格式
     } else if (l === 3 && isVNode(children)) {
       children = [children]
     }
+    // 调用 createVNode 创建 vnode
     return createVNode(type, propsOrChildren, children)
   }
 }
