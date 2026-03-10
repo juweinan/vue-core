@@ -389,8 +389,8 @@ const normalizeKey = ({ key }: VNodeProps): VNode['key'] =>
 
 /**
  * 规范化 ref
- * @param param0 
- * @returns 
+ * @param param0
+ * @returns
  */
 const normalizeRef = ({
   ref,
@@ -408,15 +408,15 @@ const normalizeRef = ({
 
 /**
  * 创建最基础的 vnode
- * @param type 
- * @param props 
- * @param children 
- * @param patchFlag 
- * @param dynamicProps 
- * @param shapeFlag 
- * @param isBlockNode 
- * @param needFullChildrenNormalization 
- * @returns 
+ * @param type
+ * @param props
+ * @param children
+ * @param patchFlag
+ * @param dynamicProps
+ * @param shapeFlag
+ * @param isBlockNode
+ * @param needFullChildrenNormalization
+ * @returns
  */
 function createBaseVNode(
   type: VNodeTypes | ClassComponent | typeof NULL_DYNAMIC_COMPONENT,
@@ -451,7 +451,7 @@ function createBaseVNode(
     target: null,
     targetAnchor: null,
     staticCount: 0,
-    shapeFlag,
+    shapeFlag, // 在上一步已经初步根据 type 判断出是什么类型的节点了
     patchFlag,
     dynamicProps,
     dynamicChildren: null,
@@ -466,7 +466,10 @@ function createBaseVNode(
       ;(type as typeof SuspenseImpl).normalize(vnode)
     }
   } else if (children) {
-    // 编译 vnode。如果传递了子元素，那么只可能是数组或者字符串
+    // 如果不是必须标准化子节点，但是又存在 children
+    // children 是字符串的时候，表示是文本子节点，否则的话是数组子节点
+    // 然后进行或运算，得到新的 shapeFlag，这样在 patch 的时候，就知道当前节点是什么类型
+    // 以及子节点是什么类型了
     vnode.shapeFlag |= isString(children)
       ? ShapeFlags.TEXT_CHILDREN
       : ShapeFlags.ARRAY_CHILDREN
@@ -477,6 +480,12 @@ function createBaseVNode(
     warn(`VNode created with invalid key (NaN). VNode type:`, vnode.type)
   }
 
+  // 下面这段代码，是 Vue3 的编译器优化核心
+  // Vue3 不想在对比新旧 DOM 的时候遍历整棵树，他只想遍历那些 “动态” 的节点，因此引入了 patchFlags（补丁标记）
+  // currentBlock 是一个 “动态节点收集袋”
+  // 当 createBaseVNode 被调用时，如果发现这个节点有 patchFlag（意味着有动态绑定，:id 或者 {{ text }} 等
+  // Vue 就会把这个 VNode 收集起来，将来更新时，直接翻这个袋子，对比里面存在的动态节点
+  // 也就是所谓的 “开挂式 Diff”
   // track vnode for block tree
   if (
     isBlockTreeEnabled > 0 &&
@@ -513,7 +522,7 @@ export const createVNode = (
 ) as typeof _createVNode
 
 /**
- * createVNode 
+ * createVNode
  * 1. 当 type 不存在或者不合理时，作为注释文本处理（兜底）
  * 2. 当 type 本身就是一个 vnode，将 vnode、props、children 合并，并返回一个全新的 vnode 对象
  * 3. 标准化 props 中的 class 和 style
@@ -522,10 +531,10 @@ export const createVNode = (
  * @param type vnode 类型
  * @param props vnode 的属性配置
  * @param children 子节点
- * @param patchFlag 
- * @param dynamicProps 
- * @param isBlockNode 
- * @returns 
+ * @param patchFlag
+ * @param dynamicProps
+ * @param isBlockNode
+ * @returns
  */
 function _createVNode(
   type: VNodeTypes | ClassComponent | typeof NULL_DYNAMIC_COMPONENT,
@@ -552,6 +561,7 @@ function _createVNode(
     if (children) {
       normalizeChildren(cloned, children)
     }
+    // 这里也是 diff 的开挂部分
     if (isBlockTreeEnabled > 0 && !isBlockNode && currentBlock) {
       if (cloned.shapeFlag & ShapeFlags.COMPONENT) {
         currentBlock[currentBlock.indexOf(type)] = cloned
@@ -588,11 +598,12 @@ function _createVNode(
       if (isProxy(style) && !isArray(style)) {
         style = extend({}, style)
       }
+      // 把数组格式（[{ color: 'red' }, { fontSize: '12px' }]）或对象格式
       props.style = normalizeStyle(style)
     }
   }
 
-  // 将 vnode 类型信息编码为位图
+  // 预判操作：首先根据传入的 type 先判断出当前 vnode 会是什么类型的
   const shapeFlag = isString(type)
     ? ShapeFlags.ELEMENT
     : __FEATURE_SUSPENSE__ && isSuspense(type)
@@ -618,7 +629,7 @@ function _createVNode(
     )
   }
 
-  // 创建基础的 vnode
+  // 创建 vnode
   return createBaseVNode(
     type,
     props,
@@ -643,7 +654,7 @@ export function guardReactiveProps(props: (Data & VNodeProps) | null) {
  * @param vnode 被克隆的 vnode
  * @param extraProps 额外的 props 配置
  * @param mergeRef ref 是否需要被克隆
- * @returns 
+ * @returns
  */
 export function cloneVNode<T, U>(
   vnode: VNode<T, U>,
@@ -790,13 +801,16 @@ export function cloneIfMounted(child: VNode): VNode {
 
 /**
  * 标准化子节点，然后将标准化之后的 children 重新添加到 vnode 上
- * @param vnode 
- * @param children 
- * @returns 
+ * 并处理 vnode 的 shapeFlag，目的是在后面 patch 的时候
+ * 能直接根据 shapeFlag 位运算判断出这是个什么类型的 vnode，以及它的 children 是什么类型
+ * @param vnode
+ * @param children
+ * @returns
  */
 export function normalizeChildren(vnode: VNode, children: unknown) {
-  // 创建一个类型值（这个并不是 vnode.type）
+  // 创建一个类型值，用于表示 children 是什么类型（这个并不是 vnode.type）
   let type = 0
+  // vnode 的原始身份（记录的是 vnode 本身）
   const { shapeFlag } = vnode
   if (children == null) {
     children = null
@@ -816,6 +830,7 @@ export function normalizeChildren(vnode: VNode, children: unknown) {
       }
       return
     } else {
+      // 对于组件的处理
       type = ShapeFlags.SLOTS_CHILDREN
       const slotFlag = (children as RawSlots)._
       if (!slotFlag && !(InternalObjectKey in children!)) {
@@ -849,6 +864,8 @@ export function normalizeChildren(vnode: VNode, children: unknown) {
     }
   }
   vnode.children = children as VNodeNormalizedChildren
+  // 将 vnode 本身的类型和子节点的类型进行位运算之后，得到的新的类型
+  // 就直接表示了当前节点以及它的子节点（后续在 patch 的时候，比较更方便
   vnode.shapeFlag |= type
 }
 

@@ -172,7 +172,7 @@ export function h<P>(
 ): VNode
 
 /**
- * h 函数：主要判断并处理传递进来的参数
+ * h 函数：参数增强器！主要判断并处理传递进来的参数
  * 处理成 type, props，children 这种标准的参数
  * 然后调用 createVNode 方法
  * @param type vnode 类型
