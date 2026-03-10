@@ -387,6 +387,11 @@ export const InternalObjectKey = `__vInternal`
 const normalizeKey = ({ key }: VNodeProps): VNode['key'] =>
   key != null ? key : null
 
+/**
+ * 规范化 ref
+ * @param param0 
+ * @returns 
+ */
 const normalizeRef = ({
   ref,
   ref_key,
@@ -401,6 +406,18 @@ const normalizeRef = ({
   ) as any
 }
 
+/**
+ * 创建最基础的 vnode
+ * @param type 
+ * @param props 
+ * @param children 
+ * @param patchFlag 
+ * @param dynamicProps 
+ * @param shapeFlag 
+ * @param isBlockNode 
+ * @param needFullChildrenNormalization 
+ * @returns 
+ */
 function createBaseVNode(
   type: VNodeTypes | ClassComponent | typeof NULL_DYNAMIC_COMPONENT,
   props: (Data & VNodeProps) | null = null,
@@ -412,8 +429,10 @@ function createBaseVNode(
   needFullChildrenNormalization = false
 ) {
   const vnode = {
+    // 是否是 vnode
     __v_isVNode: true,
     __v_skip: true,
+    // vnode 类型
     type,
     props,
     key: props && normalizeKey(props),
@@ -440,20 +459,20 @@ function createBaseVNode(
   } as VNode
 
   if (needFullChildrenNormalization) {
+    // 标准化 children 节点，然后重新添加到 vnode 上
     normalizeChildren(vnode, children)
     // normalize suspense children
     if (__FEATURE_SUSPENSE__ && shapeFlag & ShapeFlags.SUSPENSE) {
       ;(type as typeof SuspenseImpl).normalize(vnode)
     }
   } else if (children) {
-    // compiled element vnode - if children is passed, only possible types are
-    // string or Array.
+    // 编译 vnode。如果传递了子元素，那么只可能是数组或者字符串
     vnode.shapeFlag |= isString(children)
       ? ShapeFlags.TEXT_CHILDREN
       : ShapeFlags.ARRAY_CHILDREN
   }
 
-  // validate key
+  // 开发环境
   if (__DEV__ && vnode.key !== vnode.key) {
     warn(`VNode created with invalid key (NaN). VNode type:`, vnode.type)
   }
@@ -482,15 +501,32 @@ function createBaseVNode(
     defineLegacyVNodeProperties(vnode)
   }
 
+  // 返回 vnode
   return vnode
 }
 
 export { createBaseVNode as createElementVNode }
 
+// 不考虑开发环境，那么 createVNode 就是 _createVNode
 export const createVNode = (
   __DEV__ ? createVNodeWithArgsTransform : _createVNode
 ) as typeof _createVNode
 
+/**
+ * createVNode 
+ * 1. 当 type 不存在或者不合理时，作为注释文本处理（兜底）
+ * 2. 当 type 本身就是一个 vnode，将 vnode、props、children 合并，并返回一个全新的 vnode 对象
+ * 3. 标准化 props 中的 class 和 style
+ * 4. 初始化 shapeFlag 变量（暂时还不知道是干啥的）
+ * 5. 调用 createBaseVNode 创建基本的 vnode
+ * @param type vnode 类型
+ * @param props vnode 的属性配置
+ * @param children 子节点
+ * @param patchFlag 
+ * @param dynamicProps 
+ * @param isBlockNode 
+ * @returns 
+ */
 function _createVNode(
   type: VNodeTypes | ClassComponent | typeof NULL_DYNAMIC_COMPONENT,
   props: (Data & VNodeProps) | null = null,
@@ -499,6 +535,7 @@ function _createVNode(
   dynamicProps: string[] | null = null,
   isBlockNode = false
 ): VNode {
+  // 如果 vnode 类型不存在，或者是 Symbol，则当成注释文本处理
   if (!type || type === NULL_DYNAMIC_COMPONENT) {
     if (__DEV__ && !type) {
       warn(`Invalid vnode type when creating vnode: ${type}.`)
@@ -506,11 +543,12 @@ function _createVNode(
     type = Comment
   }
 
+  // 如果 type 是一个 vnode，将 props 和 children 跟 vnode 结合，返回一个新的 vnode
   if (isVNode(type)) {
-    // createVNode receiving an existing vnode. This happens in cases like
-    // <component :is="vnode"/>
-    // #2078 make sure to merge refs during the clone instead of overwriting it
+    // createVNode 接收一个已经存在的 vnode，这会发生在类似于 <component :is="vnode"/> 场景
+    // 克隆当前 vnode，但是不会修改以前的，而是返回了一个全新的克隆体，包含了 props 属性
     const cloned = cloneVNode(type, props, true /* mergeRef: true */)
+    // 如果存在子节点，则标准化子节点
     if (children) {
       normalizeChildren(cloned, children)
     }
@@ -535,12 +573,13 @@ function _createVNode(
     type = convertLegacyComponent(type, currentRenderingInstance)
   }
 
-  // class & style normalization.
+  // class、style 配置属性标准化
   if (props) {
-    // for reactive or proxy objects, we need to clone it to enable mutation.
+    // 对于反应性或代理对象，我们需要克隆它以启用突变。
     props = guardReactiveProps(props)!
     let { class: klass, style } = props
     if (klass && !isString(klass)) {
+      // 将 class 转为字符串格式，空格分隔
       props.class = normalizeClass(klass)
     }
     if (isObject(style)) {
@@ -553,7 +592,7 @@ function _createVNode(
     }
   }
 
-  // encode the vnode type information into a bitmap
+  // 将 vnode 类型信息编码为位图
   const shapeFlag = isString(type)
     ? ShapeFlags.ELEMENT
     : __FEATURE_SUSPENSE__ && isSuspense(type)
@@ -566,6 +605,7 @@ function _createVNode(
     ? ShapeFlags.FUNCTIONAL_COMPONENT
     : 0
 
+  // 开发环境，无需理会
   if (__DEV__ && shapeFlag & ShapeFlags.STATEFUL_COMPONENT && isProxy(type)) {
     type = toRaw(type)
     warn(
@@ -578,6 +618,7 @@ function _createVNode(
     )
   }
 
+  // 创建基础的 vnode
   return createBaseVNode(
     type,
     props,
@@ -593,10 +634,17 @@ function _createVNode(
 export function guardReactiveProps(props: (Data & VNodeProps) | null) {
   if (!props) return null
   return isProxy(props) || InternalObjectKey in props
-    ? extend({}, props)
+    ? extend({}, props) // 浅拷贝
     : props
 }
 
+/**
+ * 克隆 vnode，但是不改变原来的 vnode，而是创建并返回一个全新的 vnode
+ * @param vnode 被克隆的 vnode
+ * @param extraProps 额外的 props 配置
+ * @param mergeRef ref 是否需要被克隆
+ * @returns 
+ */
 export function cloneVNode<T, U>(
   vnode: VNode<T, U>,
   extraProps?: (Data & VNodeProps) | null,
@@ -605,6 +653,7 @@ export function cloneVNode<T, U>(
   // This is intentionally NOT using spread or extend to avoid the runtime
   // key enumeration cost.
   const { props, ref, patchFlag, children } = vnode
+  // 将额外的 props 和 vnode 的 props 合并，并创建一个新的 props 对象
   const mergedProps = extraProps ? mergeProps(props || {}, extraProps) : props
   const cloned: VNode = {
     __v_isVNode: true,
@@ -615,8 +664,7 @@ export function cloneVNode<T, U>(
     ref:
       extraProps && extraProps.ref
         ? // #2078 in the case of <component :is="vnode" ref="extra"/>
-          // if the vnode itself already has a ref, cloneVNode will need to merge
-          // the refs so the single vnode can be set on multiple refs
+          // 如果 vnode 自己已经有了一个 ref 引用，cloneVNode 就会合并 ref，所以可能从单个 ref 变成了多个 ref
           mergeRef && ref
           ? isArray(ref)
             ? ref.concat(normalizeRef(extraProps)!)
@@ -740,7 +788,14 @@ export function cloneIfMounted(child: VNode): VNode {
   return child.el === null || child.memo ? child : cloneVNode(child)
 }
 
+/**
+ * 标准化子节点，然后将标准化之后的 children 重新添加到 vnode 上
+ * @param vnode 
+ * @param children 
+ * @returns 
+ */
 export function normalizeChildren(vnode: VNode, children: unknown) {
+  // 创建一个类型值（这个并不是 vnode.type）
   let type = 0
   const { shapeFlag } = vnode
   if (children == null) {
@@ -748,8 +803,10 @@ export function normalizeChildren(vnode: VNode, children: unknown) {
   } else if (isArray(children)) {
     type = ShapeFlags.ARRAY_CHILDREN
   } else if (typeof children === 'object') {
+    // 如果 vnode 是 element 类型或者 TELEPORT 类型的节点
     if (shapeFlag & (ShapeFlags.ELEMENT | ShapeFlags.TELEPORT)) {
       // Normalize slot to plain children for plain element and Teleport
+      // 处理 slot
       const slot = (children as any).default
       if (slot) {
         // _c marker is added by withCtx() indicating this is a compiled slot
