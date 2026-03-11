@@ -349,8 +349,8 @@ function baseCreateRenderer(
     insertStaticContent: hostInsertStaticContent
   } = options
 
-  // Note: functions inside this closure should use `const xxx = () => {}`
-  // style in order to prevent being inlined by minifiers.
+  // 注意: 此闭包内的函数应使用 `const xxx = () => {}`
+  // 以防止被压缩工具内联.
   const patch: PatchFn = (
     n1,
     n2,
@@ -362,17 +362,21 @@ function baseCreateRenderer(
     slotScopeIds = null,
     optimized = __DEV__ && isHmrUpdating ? false : !!n2.dynamicChildren
   ) => {
+    // 如果旧的 vnode 等于新的 vnode，说明没有发生变化，直接返回无需处理
     if (n1 === n2) {
       return
     }
 
-    // patching & not same type, unmount old tree
+    // 如果 oldVnode 存在，但是新旧 vnode 的 type 和 key 都不一样
     if (n1 && !isSameVNodeType(n1, n2)) {
+      // 获取锚点：就是旧节点的下一个节点（主要用于标记 newVnode 添加的位置）
       anchor = getNextHostNode(n1)
+      // 卸载旧 vnode
       unmount(n1, parentComponent, parentSuspense, true)
       n1 = null
     }
 
+    // 如果新的 vnode.patchFlag 需要退出 diff 优化的，也就是必须全量比较
     if (n2.patchFlag === PatchFlags.BAIL) {
       optimized = false
       n2.dynamicChildren = null
@@ -380,20 +384,20 @@ function baseCreateRenderer(
 
     const { type, ref, shapeFlag } = n2
     switch (type) {
-      case Text:
+      case Text: // 文本节点
         processText(n1, n2, container, anchor)
         break
-      case Comment:
+      case Comment: // 注释节点
         processCommentNode(n1, n2, container, anchor)
         break
-      case Static:
+      case Static: // 静态节点
         if (n1 == null) {
           mountStaticNode(n2, container, anchor, isSVG)
         } else if (__DEV__) {
           patchStaticNode(n1, n2, container, isSVG)
         }
         break
-      case Fragment:
+      case Fragment: // 处理 Fragment
         processFragment(
           n1,
           n2,
@@ -408,6 +412,7 @@ function baseCreateRenderer(
         break
       default:
         if (shapeFlag & ShapeFlags.ELEMENT) {
+          // 处理元素节点
           processElement(
             n1,
             n2,
@@ -420,6 +425,7 @@ function baseCreateRenderer(
             optimized
           )
         } else if (shapeFlag & ShapeFlags.COMPONENT) {
+          // 处理组件节点
           processComponent(
             n1,
             n2,
@@ -432,6 +438,7 @@ function baseCreateRenderer(
             optimized
           )
         } else if (shapeFlag & ShapeFlags.TELEPORT) {
+          // 处理 teleport
           ;(type as typeof TeleportImpl).process(
             n1 as TeleportVNode,
             n2 as TeleportVNode,
@@ -445,6 +452,7 @@ function baseCreateRenderer(
             internals
           )
         } else if (__FEATURE_SUSPENSE__ && shapeFlag & ShapeFlags.SUSPENSE) {
+          // 处理 Suspense
           ;(type as typeof SuspenseImpl).process(
             n1,
             n2,
@@ -468,14 +476,24 @@ function baseCreateRenderer(
     }
   }
 
+  /**
+   * 处理文本节点
+   * @param n1
+   * @param n2
+   * @param container
+   * @param anchor
+   */
   const processText: ProcessTextOrCommentFn = (n1, n2, container, anchor) => {
+    // 旧的文本不存在
     if (n1 == null) {
+      // 创建文本并插入到 anchor 前面
       hostInsert(
         (n2.el = hostCreateText(n2.children as string)),
         container,
         anchor
       )
     } else {
+      // 旧的节点存在，更新文本
       const el = (n2.el = n1.el!)
       if (n2.children !== n1.children) {
         hostSetText(el, n2.children as string)
@@ -483,6 +501,13 @@ function baseCreateRenderer(
     }
   }
 
+  /**
+   * 处理注释
+   * @param n1
+   * @param n2
+   * @param container
+   * @param anchor
+   */
   const processCommentNode: ProcessTextOrCommentFn = (
     n1,
     n2,
@@ -570,6 +595,19 @@ function baseCreateRenderer(
     hostRemove(anchor!)
   }
 
+  /**
+   * 处理元素节点（第一次挂载还是 patch 更新）
+   * n1 不存在，mount(n2); n1 存在，patch(n1, n2)
+   * @param n1
+   * @param n2
+   * @param container
+   * @param anchor
+   * @param parentComponent
+   * @param parentSuspense
+   * @param isSVG
+   * @param slotScopeIds
+   * @param optimized
+   */
   const processElement = (
     n1: VNode | null,
     n2: VNode,
@@ -606,6 +644,17 @@ function baseCreateRenderer(
     }
   }
 
+  /**
+   * 挂载元素组件
+   * @param vnode
+   * @param container
+   * @param anchor
+   * @param parentComponent
+   * @param parentSuspense
+   * @param isSVG
+   * @param slotScopeIds
+   * @param optimized
+   */
   const mountElement = (
     vnode: VNode,
     container: RendererElement,
@@ -616,6 +665,7 @@ function baseCreateRenderer(
     slotScopeIds: string[] | null,
     optimized: boolean
   ) => {
+    // 渲染的真实元素
     let el: RendererElement
     let vnodeHook: VNodeHook | undefined | null
     const { type, props, shapeFlag, transition, patchFlag, dirs } = vnode
@@ -625,12 +675,11 @@ function baseCreateRenderer(
       hostCloneNode !== undefined &&
       patchFlag === PatchFlags.HOISTED
     ) {
-      // If a vnode has non-null el, it means it's being reused.
-      // Only static vnodes can be reused, so its mounted DOM nodes should be
-      // exactly the same, and we can simply do a clone here.
-      // only do this in production since cloned trees cannot be HMR updated.
+      // 如果一个 vnode 的 el 存在，表示他正在被重新使用。
+      // 只有静态的 vnode 才可能被复用，所以其挂载的DOM节点应该完全相同，我们只需在此处进行克隆即可。
       el = vnode.el = hostCloneNode(vnode.el)
     } else {
+      // 调用 createElement 方法创建 type 对应的元素
       el = vnode.el = hostCreateElement(
         vnode.type as string,
         isSVG,
@@ -638,11 +687,12 @@ function baseCreateRenderer(
         props
       )
 
-      // mount children first, since some props may rely on child content
-      // being already rendered, e.g. `<select value>`
+      // 先挂载子元素，因为某些 props 可能依赖于已经渲染好的子内容
       if (shapeFlag & ShapeFlags.TEXT_CHILDREN) {
+        // 如果子节点是纯文本，则调用 setElementText 给 el 添加文本
         hostSetElementText(el, vnode.children as string)
       } else if (shapeFlag & ShapeFlags.ARRAY_CHILDREN) {
+        // 多个子节点，挂载子节点到 el 上
         mountChildren(
           vnode.children as VNodeArrayChildren,
           el,
@@ -656,6 +706,7 @@ function baseCreateRenderer(
       }
 
       if (dirs) {
+        // 唤醒 created 生命周期函数
         invokeDirectiveHook(vnode, null, parentComponent, 'created')
       }
       // props
@@ -768,6 +819,18 @@ function baseCreateRenderer(
     }
   }
 
+  /**
+   * 挂载子节点到 container 上，对子节点一个一个的 patch，oldVnode 是 null
+   * @param children 需要被挂载的子节点
+   * @param container 父级容器
+   * @param anchor
+   * @param parentComponent
+   * @param parentSuspense
+   * @param isSVG
+   * @param slotScopeIds
+   * @param optimized
+   * @param start
+   */
   const mountChildren: MountChildrenFn = (
     children,
     container,
@@ -783,6 +846,8 @@ function baseCreateRenderer(
       const child = (children[i] = optimized
         ? cloneIfMounted(children[i] as VNode)
         : normalizeVNode(children[i]))
+      // 因为是挂载子节点，说明之前肯定是没有的，所以 oldValue 是 null
+      // 开始重新走 patch
       patch(
         null,
         child,
@@ -2063,6 +2128,15 @@ function baseCreateRenderer(
     }
   }
 
+  /**
+   * 卸载 vnode 操作
+   * @param vnode 被卸载的 vnode
+   * @param parentComponent
+   * @param parentSuspense
+   * @param doRemove
+   * @param optimized
+   * @returns
+   */
   const unmount: UnmountFn = (
     vnode,
     parentComponent,
@@ -2080,11 +2154,12 @@ function baseCreateRenderer(
       patchFlag,
       dirs
     } = vnode
-    // unset ref
+    // 取消设置 ref，简单说就是将 ref 设置为 null
     if (ref != null) {
       setRef(ref, null, parentSuspense, vnode, true)
     }
 
+    // 如果 vnode 包含 keep-alive 属性，则让这个组件失活，注意这里的 return，只是失活，并不会继续走下面的逻辑销毁 vnode
     if (shapeFlag & ShapeFlags.COMPONENT_SHOULD_KEEP_ALIVE) {
       ;(parentComponent!.ctx as KeepAliveContext).deactivate(vnode)
       return
@@ -2101,6 +2176,7 @@ function baseCreateRenderer(
       invokeVNodeHook(vnodeHook, parentComponent, vnode)
     }
 
+    // 如果是组件，调用 unmountComponent，
     if (shapeFlag & ShapeFlags.COMPONENT) {
       unmountComponent(vnode.component!, parentSuspense, doRemove)
     } else {
@@ -2313,6 +2389,11 @@ function baseCreateRenderer(
     }
   }
 
+  /**
+   * 获取 vnode 的相邻节点（主要是调用原生方法 nextSibling）
+   * @param vnode
+   * @returns
+   */
   const getNextHostNode: NextFn = vnode => {
     if (vnode.shapeFlag & ShapeFlags.COMPONENT) {
       return getNextHostNode(vnode.component!.subTree)
@@ -2323,15 +2404,25 @@ function baseCreateRenderer(
     return hostNextSibling((vnode.anchor || vnode.el)!)
   }
 
+  /**
+   * 渲染函数（渲染 vnode 到页面中）
+   * @param vnode 要渲染的 vnode
+   * @param container vnode 需要挂载到的容器
+   * @param isSVG 不考虑
+   */
   const render: RootRenderFunction = (vnode, container, isSVG) => {
+    // 如果新的 vnode 为空，但是旧的 vnode 存在，说明需要卸载掉旧的 vnode
     if (vnode == null) {
       if (container._vnode) {
         unmount(container._vnode, null, null, true)
       }
     } else {
+      // 否则，将新的 vnode 渲染到页面中
       patch(container._vnode || null, vnode, container, null, null, null, isSVG)
     }
+    // 执行挂载后需要执行的 job
     flushPostFlushCbs()
+    // 渲染完成以后，将新的 vnode 添加到 container 上当作旧的 vnode
     container._vnode = vnode
   }
 

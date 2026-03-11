@@ -225,9 +225,16 @@ export function flushPreFlushCbs(
   }
 }
 
+/**
+ * 执行 Post 类型的 watcher job（需要在挂载后执行的）
+ * @param seen 
+ * @returns 
+ */
 export function flushPostFlushCbs(seen?: CountMap) {
   // flush any pre cbs queued during the flush (e.g. pre watchers)
+  // 首先先执行挂载前需要执行但是还没有执行的 job
   flushPreFlushCbs()
+  // 如果有在等待执行的 post job，就执行他们
   if (pendingPostFlushCbs.length) {
     const deduped = [...new Set(pendingPostFlushCbs)]
     pendingPostFlushCbs.length = 0
