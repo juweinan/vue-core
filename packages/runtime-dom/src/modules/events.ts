@@ -62,6 +62,15 @@ export function removeEventListener(
   el.removeEventListener(event, handler, options)
 }
 
+/**
+ * 更新监听的函数
+ * 其实就是通过 addEventListener 和 removeEventListener 添加和删除事件监听
+ * @param el 
+ * @param rawName 监听的事件类型，比如 click，change 等
+ * @param prevValue 旧的事件监听的具体方法
+ * @param nextValue 新的事件监听的具体方法
+ * @param instance 
+ */
 export function patchEvent(
   el: Element & { _vei?: Record<string, Invoker | undefined> },
   rawName: string,
@@ -72,17 +81,19 @@ export function patchEvent(
   // vei = vue event invokers
   const invokers = el._vei || (el._vei = {})
   const existingInvoker = invokers[rawName]
+  // 如果有新的监听方法实现，并且存在旧的
   if (nextValue && existingInvoker) {
-    // patch
+    // 直接替换
     existingInvoker.value = nextValue
   } else {
     const [name, options] = parseName(rawName)
+    // 有新的，但是没有旧的事件监听函数，则创建一个方法，通过 addEventListener 发起监听
     if (nextValue) {
       // add
       const invoker = (invokers[rawName] = createInvoker(nextValue, instance))
       addEventListener(el, name, invoker, options)
     } else if (existingInvoker) {
-      // remove
+      // 如果没有新的监听，则移除旧的
       removeEventListener(el, name, existingInvoker, options)
       invokers[rawName] = undefined
     }

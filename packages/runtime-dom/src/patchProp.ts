@@ -10,6 +10,18 @@ const nativeOnRE = /^on[a-z]/
 
 type DOMRendererOptions = RendererOptions<Node, Element>
 
+/**
+ * 对比属性
+ * @param el
+ * @param key
+ * @param prevValue
+ * @param nextValue
+ * @param isSVG
+ * @param prevChildren
+ * @param parentComponent
+ * @param parentSuspense
+ * @param unmountChildren
+ */
 export const patchProp: DOMRendererOptions['patchProp'] = (
   el,
   key,
@@ -22,11 +34,14 @@ export const patchProp: DOMRendererOptions['patchProp'] = (
   unmountChildren
 ) => {
   if (key === 'class') {
+    // 完全按照 nextValue 为准，清除或者替换
     patchClass(el, nextValue, isSVG)
   } else if (key === 'style') {
+    // 完全按照 nextValue 为准，清除 style 属性或者替换为 nextValue
     patchStyle(el, prevValue, nextValue)
   } else if (isOn(key)) {
-    // ignore v-model listeners
+    // on 开头的属性（通常是监听事件）
+    // 但是忽略 v-model
     if (!isModelListener(key)) {
       patchEvent(el, key, prevValue, nextValue, parentComponent)
     }

@@ -351,6 +351,19 @@ function baseCreateRenderer(
 
   // 注意: 此闭包内的函数应使用 `const xxx = () => {}`
   // 以防止被压缩工具内联.
+  /**
+   * 比较新旧 vnode
+   * @param n1 oldVnode
+   * @param n2 newVnode
+   * @param container 
+   * @param anchor 
+   * @param parentComponent 
+   * @param parentSuspense 
+   * @param isSVG 
+   * @param slotScopeIds 
+   * @param optimized 
+   * @returns 
+   */
   const patch: PatchFn = (
     n1,
     n2,
@@ -521,7 +534,7 @@ function baseCreateRenderer(
         anchor
       )
     } else {
-      // there's no support for dynamic comments
+      // 不支持动态评论（所以说就将旧的评论节点赋值给新的即可）
       n2.el = n1.el
     }
   }
@@ -675,8 +688,11 @@ function baseCreateRenderer(
       hostCloneNode !== undefined &&
       patchFlag === PatchFlags.HOISTED
     ) {
-      // 如果一个 vnode 的 el 存在，表示他正在被重新使用。
-      // 只有静态的 vnode 才可能被复用，所以其挂载的DOM节点应该完全相同，我们只需在此处进行克隆即可。
+      // 静态提升：如果一个节点是纯静态的（没有任何数据绑定），则编译器会把它提取到渲染器之外。
+      // <div><span>static</span></div>
+      // 当这个组件重新渲染的时候，会发现 patchFlag 是 HOISTED，就不会 createElement
+      // 而是使用克隆，因为克隆一个现成的远比重新创建一个新的要快。
+      // 这也是处理静态内容的性能外挂。
       el = vnode.el = hostCloneNode(vnode.el)
     } else {
       // 调用 createElement 方法创建 type 对应的元素
@@ -705,14 +721,17 @@ function baseCreateRenderer(
         )
       }
 
+      // dirs 代表的是自定义指令（所有的自定义指令都会放在这里）
       if (dirs) {
-        // 唤醒 created 生命周期函数
+        // 在 created 的时候触发自定义指令中的钩子函数
         invokeDirectiveHook(vnode, null, parentComponent, 'created')
       }
       // props
       if (props) {
         for (const key in props) {
           if (key !== 'value' && !isReservedProp(key)) {
+            // 比较并更新 prop 属性方法
+            // 但是这里将旧值设置为 null，这个方法就变成了创建并设置的功能
             hostPatchProp(
               el,
               key,
@@ -742,7 +761,8 @@ function baseCreateRenderer(
           invokeVNodeHook(vnodeHook, parentComponent, vnode)
         }
       }
-      // scopeId
+      // 样式隔离，这也是 Scoped CSS 的原理，他会给当前 DOM 添加 data-v-xxxx 的属性
+      // 就是给 el 添加 id 属性
       setScopeId(el, vnode, vnode.scopeId, slotScopeIds, parentComponent)
     }
     if (__DEV__ || __FEATURE_PROD_DEVTOOLS__) {
@@ -755,6 +775,7 @@ function baseCreateRenderer(
         enumerable: false
       })
     }
+    // 唤醒 beforeMount 生命周期函数
     if (dirs) {
       invokeDirectiveHook(vnode, null, parentComponent, 'beforeMount')
     }
@@ -767,12 +788,16 @@ function baseCreateRenderer(
     if (needCallTransitionHooks) {
       transition!.beforeEnter(el)
     }
+    // 将 el 插入到 container 容器中
     hostInsert(el, container, anchor)
     if (
       (vnodeHook = props && props.onVnodeMounted) ||
       needCallTransitionHooks ||
       dirs
     ) {
+      // 这里其实执行的是 queuePostFlushCb 方法
+      // 作用就是在挂载后执行的一些回调函数，这里传进去一个 fn
+      // 挂载完成后执行这个回调函数
       queuePostRenderEffect(() => {
         vnodeHook && invokeVNodeHook(vnodeHook, parentComponent, vnode)
         needCallTransitionHooks && transition!.enter(el)
@@ -788,6 +813,7 @@ function baseCreateRenderer(
     slotScopeIds: string[] | null,
     parentComponent: ComponentInternalInstance | null
   ) => {
+    // 其实就是给 el 添加 id 属性
     if (scopeId) {
       hostSetScopeId(el, scopeId)
     }
@@ -862,6 +888,16 @@ function baseCreateRenderer(
     }
   }
 
+  /**
+   * 比较新旧 DOM（元素节点）
+   * @param n1 old vnode
+   * @param n2 new vnode
+   * @param parentComponent 
+   * @param parentSuspense 
+   * @param isSVG 
+   * @param slotScopeIds 
+   * @param optimized 
+   */
   const patchElement = (
     n1: VNode,
     n2: VNode,
@@ -871,11 +907,14 @@ function baseCreateRenderer(
     slotScopeIds: string[] | null,
     optimized: boolean
   ) => {
+    // 这里为什么要把旧的 vnode.el 赋值给新的 vnode.el 呢
+    // el 指的是旧的 vnode
     const el = (n2.el = n1.el!)
     let { patchFlag, dynamicChildren, dirs } = n2
     // #1426 take the old vnode's patch flag into account since user may clone a
     // compiler-generated vnode, which de-opts to FULL_PROPS
     patchFlag |= n1.patchFlag & PatchFlags.FULL_PROPS
+    // 拿到新旧 vnode 的 prop
     const oldProps = n1.props || EMPTY_OBJ
     const newProps = n2.props || EMPTY_OBJ
     let vnodeHook: VNodeHook | undefined | null
@@ -898,6 +937,8 @@ function baseCreateRenderer(
     }
 
     const areChildrenSVG = isSVG && n2.type !== 'foreignObject'
+    // 如果是动态的子组件，调用 patchBlockChildren 方法，这个就是从 block 中直接取出动态的组件，然后直接更新
+    // 不需要 diff 整个树
     if (dynamicChildren) {
       patchBlockChildren(
         n1.dynamicChildren!,
@@ -912,7 +953,7 @@ function baseCreateRenderer(
         traverseStaticChildren(n1, n2)
       }
     } else if (!optimized) {
-      // full diff
+      // 完整的 diff children
       patchChildren(
         n1,
         n2,
@@ -1017,6 +1058,7 @@ function baseCreateRenderer(
   }
 
   // The fast path for blocks.
+  // diff 快速比较外挂
   const patchBlockChildren: PatchBlockChildrenFn = (
     oldChildren,
     newChildren,
@@ -1026,10 +1068,13 @@ function baseCreateRenderer(
     isSVG,
     slotScopeIds
   ) => {
+    // 遍历新的 children
     for (let i = 0; i < newChildren.length; i++) {
+      // 按照新的 children 的顺序，分别拿到第 index 位置的单个子节点
       const oldVNode = oldChildren[i]
       const newVNode = newChildren[i]
       // Determine the container (parent element) for the patch.
+      // container 要么是 oldVNode.el.parentNode，要么是 fallbackContainer
       const container =
         // oldVNode may be an errored async setup() component inside Suspense
         // which will not have a mounted element
@@ -1046,6 +1091,7 @@ function baseCreateRenderer(
           : // In other cases, the parent container is not actually used so we
             // just pass the block element here to avoid a DOM parentNode call.
             fallbackContainer
+      // 调用 patch 比较新旧 DOM
       patch(
         oldVNode,
         newVNode,
@@ -1675,7 +1721,7 @@ function baseCreateRenderer(
     const c2 = n2.children
 
     const { patchFlag, shapeFlag } = n2
-    // fast path
+    // fast path 快速比较方式
     if (patchFlag > 0) {
       if (patchFlag & PatchFlags.KEYED_FRAGMENT) {
         // this could be either fully-keyed or mixed (some keyed some not)
