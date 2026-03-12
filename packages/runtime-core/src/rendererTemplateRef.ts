@@ -27,6 +27,7 @@ export function setRef(
   vnode: VNode,
   isUnmount = false
 ) {
+  // 如果传入的 ref 是数组，则递归调用 setRef 方法
   if (isArray(rawRef)) {
     rawRef.forEach((r, i) =>
       setRef(
@@ -40,6 +41,7 @@ export function setRef(
     return
   }
 
+  // 如果是异步组件并且不是卸载动作（什么都不处理）
   if (isAsyncWrapper(vnode) && !isUnmount) {
     // when mounting async components, nothing needs to be done,
     // because the template ref is forwarded to inner component
