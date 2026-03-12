@@ -389,6 +389,8 @@ function baseCreateRenderer(
       n1 = null
     }
 
+    // 如果这里 n1 还存在，那么说明 n1 和 n2 的 type 和 key 肯定是相等的
+    // 因为如果其中一个不一样，n1 就是 null
     // 如果新的 vnode.patchFlag 需要退出 diff 优化的，也就是必须全量比较
     if (n2.patchFlag === PatchFlags.BAIL) {
       optimized = false // 退出 diff 优化
@@ -908,7 +910,10 @@ function baseCreateRenderer(
     optimized: boolean
   ) => {
     // 问：这里为什么要执行 newVNode.el = oldVNode.el ?
-    // el 指的是旧的 vnode 的 el
+    // 因为前面有一个判断 isSameVNodeType(n1, n2)，如果单反 type 或者 key 不相等，n1 都是 null
+    // 那时候只会进入 mount 逻辑，而不会进入 patch 逻辑
+    // 因此这里的 n1 和 n2 只会存在 props 和 children 的不同
+    // 所以这里 n2 的 el 就是 n1 的 el
     const el = (n2.el = n1.el!)
     let { patchFlag, dynamicChildren, dirs } = n2
     // #1426 take the old vnode's patch flag into account since user may clone a
@@ -1059,13 +1064,13 @@ function baseCreateRenderer(
   /**
    * diff 的快速比较
    * 其实就是循环新的子节点，然后找到旧子节点对应索引的节点，执行 patch 方法。
-   * @param oldChildren 
-   * @param newChildren 
-   * @param fallbackContainer 
-   * @param parentComponent 
-   * @param parentSuspense 
-   * @param isSVG 
-   * @param slotScopeIds 
+   * @param oldChildren
+   * @param newChildren
+   * @param fallbackContainer
+   * @param parentComponent
+   * @param parentSuspense
+   * @param isSVG
+   * @param slotScopeIds
    */
   const patchBlockChildren: PatchBlockChildrenFn = (
     oldChildren,
@@ -1715,16 +1720,16 @@ function baseCreateRenderer(
 
   /**
    * 非优化版本的 diff children
-   * @param n1 
-   * @param n2 
-   * @param container 
-   * @param anchor 
-   * @param parentComponent 
-   * @param parentSuspense 
-   * @param isSVG 
-   * @param slotScopeIds 
-   * @param optimized 
-   * @returns 
+   * @param n1
+   * @param n2
+   * @param container
+   * @param anchor
+   * @param parentComponent
+   * @param parentSuspense
+   * @param isSVG
+   * @param slotScopeIds
+   * @param optimized
+   * @returns
    */
   const patchChildren: PatchChildrenFn = (
     n1,
@@ -1737,16 +1742,20 @@ function baseCreateRenderer(
     slotScopeIds,
     optimized = false
   ) => {
+    // oldVNodeChildren
     const c1 = n1 && n1.children
+    // oldVNodeShapeFlag
     const prevShapeFlag = n1 ? n1.shapeFlag : 0
+    // newVNodeChildren
     const c2 = n2.children
 
     const { patchFlag, shapeFlag } = n2
-    // fast path 快速比较方式
+    // 这里是 diff 的开挂模式（编译的时候就标记了，这里可以快速比较）
     if (patchFlag > 0) {
+      // 表示 newVNode 是一个子级包含或部分包含 key 的节点
       if (patchFlag & PatchFlags.KEYED_FRAGMENT) {
-        // this could be either fully-keyed or mixed (some keyed some not)
-        // presence of patchFlag means children are guaranteed to be arrays
+        // 这可以是完全键控的，也可以是混合的（有些键控，有些不键控）。
+        // patchFlag 的存在意味着子节点保证是 “数组”
         patchKeyedChildren(
           c1 as VNode[],
           c2 as VNodeArrayChildren,
@@ -1760,7 +1769,7 @@ function baseCreateRenderer(
         )
         return
       } else if (patchFlag & PatchFlags.UNKEYED_FRAGMENT) {
-        // unkeyed
+        // 没有 key 的（这个就需要全量比较了）
         patchUnkeyedChildren(
           c1 as VNode[],
           c2 as VNodeArrayChildren,
@@ -1776,20 +1785,25 @@ function baseCreateRenderer(
       }
     }
 
-    // children has 3 possibilities: text, array or no children.
+    // 子节点有三种可能性: text, array 或者没有 children.
+    // 如果新的 vnode 是文本类型的子节点
     if (shapeFlag & ShapeFlags.TEXT_CHILDREN) {
-      // text children fast path
+      // 旧的 vnode 子节点是数组，则直接卸载旧的子节点
       if (prevShapeFlag & ShapeFlags.ARRAY_CHILDREN) {
         unmountChildren(c1 as VNode[], parentComponent, parentSuspense)
       }
+      // 不是数组，只可能是文本，或者没有，只要是不一样，就像 newVNode 的文本设置到 el 上
       if (c2 !== c1) {
         hostSetElementText(container, c2 as string)
       }
     } else {
+      // 新的不是文本（数组或者不存在）
+      // 旧的是数组子节点
       if (prevShapeFlag & ShapeFlags.ARRAY_CHILDREN) {
-        // prev children was array
+        // 新的也是数组（旧的也是数组）
         if (shapeFlag & ShapeFlags.ARRAY_CHILDREN) {
           // two arrays, cannot assume anything, do full diff
+          // 两个都是数组，不能假设任何事情，做全量的 diff（因为这里不是开挂模式，所以也不知道有没有 key 等）
           patchKeyedChildren(
             c1 as VNode[],
             c2 as VNodeArrayChildren,
@@ -1802,16 +1816,19 @@ function baseCreateRenderer(
             optimized
           )
         } else {
-          // no new children, just unmount old
+          // 新的既不是文本，又不是数组，那只能是没有 children，所以卸载掉旧的 children
           unmountChildren(c1 as VNode[], parentComponent, parentSuspense, true)
         }
       } else {
-        // prev children was text OR null
-        // new children is array OR null
+        // 旧的 children 是 text 或 null
+        // 新的 children 是 array 或 null
         if (prevShapeFlag & ShapeFlags.TEXT_CHILDREN) {
+          // 如果旧的是文本，则清空文本
           hostSetElementText(container, '')
         }
-        // mount new if array
+        // 这个时候旧的只可能是 null 了，新的如果是 null 就不需要处理
+        // 所以只需要处理新的是数组的情况。然后开始挂载 children
+        // 这里也是循环 children 然后分别 patch
         if (shapeFlag & ShapeFlags.ARRAY_CHILDREN) {
           mountChildren(
             c2 as VNodeArrayChildren,
@@ -1828,6 +1845,22 @@ function baseCreateRenderer(
     }
   }
 
+  /**
+   * patch 不包含 key 的 children
+   * 取到新旧 children.length 的最小值 minLength
+   * 然后从 0 开始，到 minLength 结束，逐一 patch
+   * 旧的有剩余，那么就 unmount 剩余的旧的
+   * 新的有剩余，那么就 mount 剩余的新的
+   * @param c1
+   * @param c2
+   * @param container
+   * @param anchor
+   * @param parentComponent
+   * @param parentSuspense
+   * @param isSVG
+   * @param slotScopeIds
+   * @param optimized
+   */
   const patchUnkeyedChildren = (
     c1: VNode[],
     c2: VNodeArrayChildren,
@@ -1843,8 +1876,10 @@ function baseCreateRenderer(
     c2 = c2 || EMPTY_ARR
     const oldLength = c1.length
     const newLength = c2.length
+    // 最小的子节点长度（从头开始，能 patch 的最大长度）
     const commonLength = Math.min(oldLength, newLength)
     let i
+    // 从 0 开始到最大长度，每一个 都执行一次 patch（这也是为什么没有 key 性能差的原因）
     for (i = 0; i < commonLength; i++) {
       const nextChild = (c2[i] = optimized
         ? cloneIfMounted(c2[i] as VNode)
@@ -1861,8 +1896,10 @@ function baseCreateRenderer(
         optimized
       )
     }
+    // 如果旧的子节点多于新的子节点数量
     if (oldLength > newLength) {
-      // remove old
+      // 直接卸载掉整个旧的子节点（是从 commonLength 开始卸载）
+      // 这里就相当于从 commonLength 开始，对剩余的每一个 child 执行 unmount
       unmountChildren(
         c1,
         parentComponent,
@@ -1872,7 +1909,7 @@ function baseCreateRenderer(
         commonLength
       )
     } else {
-      // mount new
+      // 从 commonLength 开始，对剩余的每一个 child 执行 unmount
       mountChildren(
         c2,
         container,
@@ -1887,7 +1924,18 @@ function baseCreateRenderer(
     }
   }
 
-  // can be all-keyed or mixed
+  /**
+   * children 可能全部都包含 key 或者部分包含 key
+   * @param c1 旧的子节点
+   * @param c2 新的子节点
+   * @param container
+   * @param parentAnchor
+   * @param parentComponent
+   * @param parentSuspense
+   * @param isSVG
+   * @param slotScopeIds
+   * @param optimized
+   */
   const patchKeyedChildren = (
     c1: VNode[],
     c2: VNodeArrayChildren,
@@ -1900,18 +1948,21 @@ function baseCreateRenderer(
     optimized: boolean
   ) => {
     let i = 0
-    const l2 = c2.length
-    let e1 = c1.length - 1 // prev ending index
-    let e2 = l2 - 1 // next ending index
+    const l2 = c2.length // 新的子节点 length
+    let e1 = c1.length - 1 // 旧的 children 结束 index
+    let e2 = l2 - 1 // 新的 children 结束 index
 
-    // 1. sync from start
+    // 1. sync from start 同步从前面开始
     // (a b) c
     // (a b) d e
     while (i <= e1 && i <= e2) {
+      // 第一个旧的节点
       const n1 = c1[i]
+      // 第一个新的节点
       const n2 = (c2[i] = optimized
         ? cloneIfMounted(c2[i] as VNode)
         : normalizeVNode(c2[i]))
+      // 如果两个节点的 key 和 type 都一样，就深度 patch
       if (isSameVNodeType(n1, n2)) {
         patch(
           n1,
@@ -1925,19 +1976,26 @@ function baseCreateRenderer(
           optimized
         )
       } else {
+        // 如果不一样，就跳出当前循环，比如比较到 c d，发现不一样
+        // 从前面开始比较就结束了
         break
       }
+      // 正向比较的索引向后移
       i++
     }
 
-    // 2. sync from end
+    // 2. 同步从后面比较
     // a (b c)
     // d e (b c)
     while (i <= e1 && i <= e2) {
+      // 最后一个旧的子节点
       const n1 = c1[e1]
+      // 最后一个新的子节点
       const n2 = (c2[e2] = optimized
         ? cloneIfMounted(c2[e2] as VNode)
         : normalizeVNode(c2[e2]))
+
+      // 如果两个节点 key 一致，type 也一致，就深度 patch（可能是完全一样，也可能是 props 或者 children 不一样）
       if (isSameVNodeType(n1, n2)) {
         patch(
           n1,
@@ -1953,11 +2011,17 @@ function baseCreateRenderer(
       } else {
         break
       }
+      // 新旧 children 的 index 都向前移动
       e1--
       e2--
     }
 
-    // 3. common sequence + mount
+    // 到这一步，我认为存在以下几种情况
+    // - oldChildren 比较完了
+    // - newChildren 比较完了
+    // - 新旧都有剩余，但是首位的和最末尾的都不一样
+
+    // 3. i > e1，很明显符合 oldChildren 已经 patch 结束了，剩下的都是 newChildren，只需要挂载即可
     // (a b)
     // (a b) c
     // i = 2, e1 = 1, e2 = 2
@@ -1965,9 +2029,13 @@ function baseCreateRenderer(
     // c (a b)
     // i = 0, e1 = -1, e2 = 0
     if (i > e1) {
+      // 如果还存在 newChildren
       if (i <= e2) {
+        // 有可能剩余的 new child 是中间位的，所以要找后面的兄弟节点
         const nextPos = e2 + 1
+        // 如果后面存在兄弟节点，就用兄弟节点作为锚点，否则就用父节点作为锚点
         const anchor = nextPos < l2 ? (c2[nextPos] as VNode).el : parentAnchor
+        // 将剩余的 new child 分别挂载
         while (i <= e2) {
           patch(
             null,
@@ -1987,7 +2055,7 @@ function baseCreateRenderer(
       }
     }
 
-    // 4. common sequence + unmount
+    // 4. i > e2，很明显符合 newChildren 已经 patch 结束了，剩余的都是 oldChildren，只需要 unmount
     // (a b) c
     // (a b)
     // i = 2, e1 = 2, e2 = 1
@@ -1995,26 +2063,31 @@ function baseCreateRenderer(
     // (b c)
     // i = 0, e1 = 0, e2 = -1
     else if (i > e2) {
+      // 卸载剩余的 child
       while (i <= e1) {
         unmount(c1[i], parentComponent, parentSuspense, true)
         i++
       }
     }
 
-    // 5. unknown sequence
+    // 5. 都有剩余，但是新旧都不一样
     // [i ... e1 + 1]: a b [c d e] f g
     // [i ... e2 + 1]: a b [e d c h] f g
     // i = 2, e1 = 4, e2 = 5
     else {
-      const s1 = i // prev starting index
-      const s2 = i // next starting index
+      const s1 = i // 旧的开始索引
+      const s2 = i // 新的开始索引
 
-      // 5.1 build key:index map for newChildren
+      // 5.1 给 newChildren 构建一个 key => index 的映射关系
       const keyToNewIndexMap: Map<string | number | symbol, number> = new Map()
+      // s2 表示 new 的 start，e2 表示 new 的 end
       for (i = s2; i <= e2; i++) {
+        // 当前的 newChild
         const nextChild = (c2[i] = optimized
           ? cloneIfMounted(c2[i] as VNode)
           : normalizeVNode(c2[i]))
+        // 如果有 key，则添加 key => i 映射关系（这里并没有修改 restNewChildren）
+        // 不过这里并没有存储没有 key 的子节点
         if (nextChild.key != null) {
           if (__DEV__ && keyToNewIndexMap.has(nextChild.key)) {
             warn(
@@ -2027,53 +2100,68 @@ function baseCreateRenderer(
         }
       }
 
-      // 5.2 loop through old children left to be patched and try to patch
-      // matching nodes & remove nodes that are no longer present
+      // 5.2 循环遍历需要 patch 的旧子节点，并尝试 patch 匹配的节点以及删除不再存在的节点
       let j
-      let patched = 0
-      const toBePatched = e2 - s2 + 1
+      let patched = 0 // 已经对比完的旧节点数量
+      const toBePatched = e2 - s2 + 1 // 剩余的 newChildren 的 length
       let moved = false
-      // used to track whether any node has moved
+      // 用于跟踪是否有任何节点已移动
       let maxNewIndexSoFar = 0
-      // works as Map<newIndex, oldIndex>
-      // Note that oldIndex is offset by +1
-      // and oldIndex = 0 is a special value indicating the new node has
-      // no corresponding old node.
-      // used for determining longest stable subsequence
+      // 作为一个 Map<newIndex, oldIndex> 使用
+      // 请注意，oldIndex 偏移了 +1
+      // oldIndex = 0 是一个特殊值，表示新节点具有没有对应的旧节点。
+      // 用于确定最长稳定子序列
       const newIndexToOldIndexMap = new Array(toBePatched)
+      // 根据剩余的 newChildren 的 length，创建一个数组，并且数组的每一项都是 0
       for (i = 0; i < toBePatched; i++) newIndexToOldIndexMap[i] = 0
 
+      // 然后开始遍历 restOldChildren
       for (i = s1; i <= e1; i++) {
+        // 第一个剩余的子节点
         const prevChild = c1[i]
+        // 如果说已经 patch 完的旧子节点数量已经大于等于需要对比的新节点数量了
+        // 并且还有旧子节点存在，那么只需要卸载就好了
         if (patched >= toBePatched) {
           // all new children have been patched so this can only be a removal
           unmount(prevChild, parentComponent, parentSuspense, true)
           continue
         }
+        // 跟 oldChild 相同 key 的 newChild 的 index
         let newIndex
+        // 如果当前循环中旧的节点存在 key，那么就从 keyToNewIndexMap 中读取 key 属性
+        // 得到的结果要么是 undefined，要么是相同 key 的 newChild 在 newChildren 中的 index
         if (prevChild.key != null) {
           newIndex = keyToNewIndexMap.get(prevChild.key)
         } else {
-          // key-less node, try to locate a key-less node of the same type
+          // 没有 key 的节点, 尝试定位相同 type 的 no-key 的节点
+          // 从 restNewChildren 中查找跟 当前 oldChild 相同 type 的节点，并且这个新节点没有被别的旧节点匹配过
           for (j = s2; j <= e2; j++) {
             if (
               newIndexToOldIndexMap[j - s2] === 0 &&
               isSameVNodeType(prevChild, c2[j] as VNode)
             ) {
+              // 找到了，标记一下对应的新节点的位置
               newIndex = j
               break
             }
           }
         }
+        // 如果在剩余的新子节点中没找到，直接卸载当前子节点
         if (newIndex === undefined) {
           unmount(prevChild, parentComponent, parentSuspense, true)
         } else {
+          // 找到了，在 newIndexToOldIndexMap 中对应的节点标记一下
+          // 标记的位置 newIndex - s2 表示新节点在剩余节点中的位置
+          // 这个位置中的值代表的是 旧节点的索引 + 1（只要不是 0，就代表被匹配过了）
           newIndexToOldIndexMap[newIndex - s2] = i + 1
+          // 下面这个记录位置和标记 move 应该是 patch 完了需要移动到正确的位置（暂时还不知道怎么玩的）
           if (newIndex >= maxNewIndexSoFar) {
+            // 记录一下当前旧节点对应的新节点的位置？？？
             maxNewIndexSoFar = newIndex
           } else {
             moved = true
           }
+          // 比较这两个节点
           patch(
             prevChild,
             c2[newIndex] as VNode,
@@ -2090,12 +2178,12 @@ function baseCreateRenderer(
       }
 
       // 5.3 move and mount
-      // generate longest stable subsequence only when nodes have moved
+      // 仅当节点移动时生成最长稳定子序列
       const increasingNewIndexSequence = moved
         ? getSequence(newIndexToOldIndexMap)
         : EMPTY_ARR
       j = increasingNewIndexSequence.length - 1
-      // looping backwards so that we can use last patched node as anchor
+      // 向后循环，以便我们可以使用最后 patch 的节点作为锚点
       for (i = toBePatched - 1; i >= 0; i--) {
         const nextIndex = s2 + i
         const nextChild = c2[nextIndex] as VNode
