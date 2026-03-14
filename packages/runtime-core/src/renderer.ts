@@ -2079,6 +2079,9 @@ function baseCreateRenderer(
       const s2 = i // 新的开始索引
 
       // 5.1 给 newChildren 构建一个 key => index 的映射关系
+      /**
+       * 存在 key 的 newChild 在整个 newChildren 中的 index（key => index)
+       */
       const keyToNewIndexMap: Map<string | number | symbol, number> = new Map()
       // s2 表示 new 的 start，e2 表示 new 的 end
       for (i = s2; i <= e2; i++) {
@@ -2104,6 +2107,9 @@ function baseCreateRenderer(
       let j
       let patched = 0 // 已经对比完的旧节点数量
       const toBePatched = e2 - s2 + 1 // 剩余的 newChildren 的 length
+      // 用于记录是否需要移动
+      // 如果不需要移动，说明相对位置顺序是正确的，后面只需要 patch 就好了
+      // 如果需要移动，说明位置是错误的
       let moved = false
       // 用于跟踪是否有任何节点已移动
       let maxNewIndexSoFar = 0
@@ -2156,9 +2162,15 @@ function baseCreateRenderer(
           newIndexToOldIndexMap[newIndex - s2] = i + 1
           // 下面这个记录位置和标记 move 应该是 patch 完了需要移动到正确的位置（暂时还不知道怎么玩的）
           if (newIndex >= maxNewIndexSoFar) {
-            // 记录一下当前旧节点对应的新节点的位置？？？
+            // 如果当前跟 oldChild 相等的 newChild 大于等于 maxNewIndexSoFar（默认 0，第一次肯定是成立的）
+            // 用这个字段记录当前找到的新节点的索引
+            // 等到下一个循环，oldChild 对应的 newChild 在上一个 newIndex 后面
+            // 说明这时候顺序是对的，再记录新的 newIndex
             maxNewIndexSoFar = newIndex
           } else {
+            // 如果当前循环 oldChild 对应的 newChild 的 index 小于上一个对应的
+            // 说明这个 oldChild 本应该再上一个节点的后面，但是在 newChildren 中跑到了前面
+            // 那就标记一下发生了移动。
             moved = true
           }
           // 比较这两个节点
@@ -2178,19 +2190,26 @@ function baseCreateRenderer(
       }
 
       // 5.3 move and mount
-      // 仅当节点移动时生成最长稳定子序列
+      // 最长递增子序列（这里返回的是剩余的新的子结点中不需要移动的索引集合）
       const increasingNewIndexSequence = moved
         ? getSequence(newIndexToOldIndexMap)
         : EMPTY_ARR
+      // 最长递增子序列的最后一个索引，j => index
       j = increasingNewIndexSequence.length - 1
-      // 向后循环，以便我们可以使用最后 patch 的节点作为锚点
+      // 倒序遍历（因为 insertBefore 需要一个参照物）
+      // 只有从后往前处理，才能保证每次处理一个节点时，右边的是已经排好的
+      // 按照剩余的新的子节点来循环
       for (i = toBePatched - 1; i >= 0; i--) {
+        // 新的索引
         const nextIndex = s2 + i
+        // 新的子节点
         const nextChild = c2[nextIndex] as VNode
+        // 锚点（如果是最后一个子节点，锚点就是父节点锚点，否则的话就是后面的兄弟元素）
         const anchor =
           nextIndex + 1 < l2 ? (c2[nextIndex + 1] as VNode).el : parentAnchor
+        // 等于 0，说明 newChild 对应的值是 0，也就是在旧的里面没找到相似的
         if (newIndexToOldIndexMap[i] === 0) {
-          // mount new
+          // 挂载新的（直接挂载到锚点前面）
           patch(
             null,
             nextChild,
@@ -2206,10 +2225,11 @@ function baseCreateRenderer(
           // move if:
           // There is no stable subsequence (e.g. a reverse)
           // OR current node is not among the stable sequence
+          // 如果存在需要移动的节点，并且不在递增子序列，移动
           if (j < 0 || i !== increasingNewIndexSequence[j]) {
             move(nextChild, container, anchor, MoveType.REORDER)
           } else {
-            j--
+            j-- // 跳过，这个节点不需要动
           }
         }
       }
