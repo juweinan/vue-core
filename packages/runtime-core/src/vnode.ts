@@ -778,6 +778,11 @@ export function createCommentVNode(
     : createVNode(Comment, null, text)
 }
 
+/**
+ * 根据 vnode 类型，创建不同的 vnode
+ * @param child 
+ * @returns 
+ */
 export function normalizeVNode(child: VNodeChild): VNode {
   if (child == null || typeof child === 'boolean') {
     // empty placeholder

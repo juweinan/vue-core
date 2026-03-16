@@ -1274,6 +1274,18 @@ function baseCreateRenderer(
     }
   }
 
+  /**
+   * 处理组件类型
+   * @param n1
+   * @param n2
+   * @param container
+   * @param anchor
+   * @param parentComponent
+   * @param parentSuspense
+   * @param isSVG
+   * @param slotScopeIds
+   * @param optimized
+   */
   const processComponent = (
     n1: VNode | null,
     n2: VNode,
@@ -1286,7 +1298,10 @@ function baseCreateRenderer(
     optimized: boolean
   ) => {
     n2.slotScopeIds = slotScopeIds
+    // 如果旧的不存在
     if (n1 == null) {
+      // 如果是 keep-alive 类型的组件，只需要调用 activate 方法激活就可以了
+      // 因为 keep-alive 组件，在 “卸载” 的时候也只是让它失去活性，而非真正意义上的卸载
       if (n2.shapeFlag & ShapeFlags.COMPONENT_KEPT_ALIVE) {
         ;(parentComponent!.ctx as KeepAliveContext).activate(
           n2,
@@ -1296,6 +1311,7 @@ function baseCreateRenderer(
           optimized
         )
       } else {
+        // 创建组件实例 + 挂载组件
         mountComponent(
           n2,
           container,
@@ -1307,10 +1323,24 @@ function baseCreateRenderer(
         )
       }
     } else {
+      // 旧的存在，就调用更新组件方法
+      // 当父组件修改了某个属性值，恰好这个属性被子节点通过 prop 的方式使用了
+      // 这个时候，就会进入当前更新逻辑
       updateComponent(n1, n2, optimized)
     }
   }
 
+  /**
+   * 挂载组件
+   * @param initialVNode 需要被挂载的组件的 vnode
+   * @param container
+   * @param anchor
+   * @param parentComponent
+   * @param parentSuspense
+   * @param isSVG
+   * @param optimized
+   * @returns
+   */
   const mountComponent: MountComponentFn = (
     initialVNode,
     container,
@@ -1320,10 +1350,13 @@ function baseCreateRenderer(
     isSVG,
     optimized
   ) => {
-    // 2.x compat may pre-create the component instance before actually
-    // mounting
+    // Vue2 的兼容，不看
     const compatMountInstance =
       __COMPAT__ && initialVNode.isCompatRoot && initialVNode.component
+
+    // 1. 初始化组件实例对象（这个实例对象包含了组件应有的特性，还包含了 vnode）
+    // initialVNode.component = instance
+    // instance.vnode = initialVNode
     const instance: ComponentInternalInstance =
       compatMountInstance ||
       (initialVNode.component = createComponentInstance(
@@ -1341,24 +1374,27 @@ function baseCreateRenderer(
       startMeasure(instance, `mount`)
     }
 
-    // inject renderer internals for keepAlive
+    // 注入渲染器内部逻辑以实现 keepAlive
     if (isKeepAlive(initialVNode)) {
       ;(instance.ctx as KeepAliveContext).renderer = internals
     }
 
-    // resolve props and slots for setup context
+    // 处理 setup 上下文中的 props 和 slots
     if (!(__COMPAT__ && compatMountInstance)) {
       if (__DEV__) {
         startMeasure(instance, `init`)
       }
+      // 2. 开始构建组件 --- 最最重要的一件事儿就是生成组件的 render 函数
+      // 要么是 setup 返回了一个方法，作为 render
+      // 要么是 compile(template) 返回的 render
+      // 要么是 Component 对象中手动编辑的 render
       setupComponent(instance)
       if (__DEV__) {
         endMeasure(instance, `init`)
       }
     }
 
-    // setup() is async. This component relies on async logic to be resolved
-    // before proceeding
+    // setup（）是异步的。此组件依赖于在继续之前解析异步逻辑
     if (__FEATURE_SUSPENSE__ && instance.asyncDep) {
       parentSuspense && parentSuspense.registerDep(instance, setupRenderEffect)
 
@@ -1371,6 +1407,7 @@ function baseCreateRenderer(
       return
     }
 
+    // 建立组件中状态和 effect 之间的关联
     setupRenderEffect(
       instance,
       initialVNode,
@@ -1387,6 +1424,13 @@ function baseCreateRenderer(
     }
   }
 
+  /**
+   * 更新组件
+   * @param n1
+   * @param n2
+   * @param optimized
+   * @returns
+   */
   const updateComponent = (n1: VNode, n2: VNode, optimized: boolean) => {
     const instance = (n2.component = n1.component)!
     if (shouldUpdateComponent(n1, n2, optimized)) {
@@ -1397,25 +1441,26 @@ function baseCreateRenderer(
       ) {
         // async & still pending - just update props and slots
         // since the component's reactive effect for render isn't set-up yet
+        // async & 仍在等待中的 - 只需更新 props 和 slots，因为组件的渲染 effect 效果尚未设置
         if (__DEV__) {
           pushWarningContext(n2)
         }
+        // 渲染组件之前，更新组件的属性
         updateComponentPreRender(instance, n2, optimized)
         if (__DEV__) {
           popWarningContext()
         }
         return
       } else {
-        // normal update
+        // 正常的组件更新
         instance.next = n2
-        // in case the child component is also queued, remove it to avoid
-        // double updating the same child component in the same flush.
+        // 如果子组件也排队，请将其删除，以避免在同一次刷新中重复更新同一个子组件。
         invalidateJob(instance.update)
-        // instance.update is the reactive effect.
+        // 执行 update，其实就是执行 effect.fn
         instance.update()
       }
     } else {
-      // no update needed. just copy over properties
+      // 不需要更新
       n2.el = n1.el
       instance.vnode = n2
     }
@@ -1430,7 +1475,20 @@ function baseCreateRenderer(
     isSVG,
     optimized
   ) => {
+    // 组件更新函数
+    // 如果组件实例还没有被挂载：那么找到组件的根节点，然后执行 patch 方法挂载，挂载完了执行生命周期函数，标记为组件已经挂载完了
+    // 如果组件实例已经被挂在了：从根节点开始 patch
+
+    // 一共有两种情况，会执行组件的 update
+    // 1. 当第一次执行挂载的时候，render 函数中对响应式属性的访问，会导致属性和 effect 之间的依赖收集
+    //    这时组件内部因为某些操作，导致属性值发生了变化，从而触发 trigger，然后执行 scheduler，调用 componentUpdateFn 更新
+    //    这步叫组件自更新。
+    // 2. 还是组件挂载完了之后，父组件因为操作更新了某个属性，恰好这个属性被子组件通过 prop 的方式接收了
+    //    这时候就会进入 updateComponent，然后发现组件的 props 发生了变化，确实需要更新
+    //    然后调用了 instance.update，同样的还是会执行 componentUpdateFn 中的更新逻辑。
     const componentUpdateFn = () => {
+      // 如果组件实例还没有被挂载
+      // 生成组件的根节点，然后通过 patch 执行挂载
       if (!instance.isMounted) {
         let vnodeHook: VNodeHook | null | undefined
         const { el, props } = initialVNode
@@ -1438,7 +1496,7 @@ function baseCreateRenderer(
         const isAsyncWrapperVNode = isAsyncWrapper(initialVNode)
 
         toggleRecurse(instance, false)
-        // beforeMount hook
+        // 执行 beforeMount hook
         if (bm) {
           invokeArrayFns(bm)
         }
@@ -1463,6 +1521,7 @@ function baseCreateRenderer(
             if (__DEV__) {
               startMeasure(instance, `render`)
             }
+            // 获取组件实例的根
             instance.subTree = renderComponentRoot(instance)
             if (__DEV__) {
               endMeasure(instance, `render`)
@@ -1497,6 +1556,10 @@ function baseCreateRenderer(
           if (__DEV__) {
             startMeasure(instance, `render`)
           }
+          // 通过 renderComponentRoot 创建组件的根 vnode
+          // 其实就是执行组件的 render 函数，然后再通过 normalizeVNode 标准化一下得到的新的 vnode
+          // 组件本身的 vnode 代表的是 <ComponentChild />
+          // subTree 代表的是组件的根元素 <div> ... </div>
           const subTree = (instance.subTree = renderComponentRoot(instance))
           if (__DEV__) {
             endMeasure(instance, `render`)
@@ -1504,6 +1567,7 @@ function baseCreateRenderer(
           if (__DEV__) {
             startMeasure(instance, `patch`)
           }
+          // 调用 patch 方法挂载组件节点
           patch(
             null,
             subTree,
@@ -1516,10 +1580,12 @@ function baseCreateRenderer(
           if (__DEV__) {
             endMeasure(instance, `patch`)
           }
+          // 同步 el 属性
           initialVNode.el = subTree.el
         }
-        // mounted hook
+        // 执行 mounted hook
         if (m) {
+          // 挂载后的 promise
           queuePostRenderEffect(m, parentSuspense)
         }
         // onVnodeMounted
@@ -1563,6 +1629,7 @@ function baseCreateRenderer(
             )
           }
         }
+        // 标记组件已经挂在完毕
         instance.isMounted = true
 
         if (__DEV__ || __FEATURE_PROD_DEVTOOLS__) {
@@ -1572,7 +1639,7 @@ function baseCreateRenderer(
         // #2458: deference mount-only object parameters to prevent memleaks
         initialVNode = container = anchor = null as any
       } else {
-        // updateComponent
+        // 更新组件
         // This is triggered by mutation of component's own state (next: null)
         // OR parent calling processComponent (next: VNode)
         let { next, bu, u, parent, vnode } = instance
@@ -1586,6 +1653,7 @@ function baseCreateRenderer(
         toggleRecurse(instance, false)
         if (next) {
           next.el = vnode.el
+          // 渲染前更新组件
           updateComponentPreRender(instance, next, optimized)
         } else {
           next = vnode
@@ -1611,16 +1679,19 @@ function baseCreateRenderer(
         if (__DEV__) {
           startMeasure(instance, `render`)
         }
+        // 获取更新后的 subTree（组件中根元素的 vnode）
         const nextTree = renderComponentRoot(instance)
         if (__DEV__) {
           endMeasure(instance, `render`)
         }
+        // 旧的组件根 vnode
         const prevTree = instance.subTree
         instance.subTree = nextTree
 
         if (__DEV__) {
           startMeasure(instance, `patch`)
         }
+        // 执行 patch 方法，更新两个 vnode
         patch(
           prevTree,
           nextTree,
@@ -1674,12 +1745,15 @@ function baseCreateRenderer(
     }
 
     // create reactive effect for rendering
+    // 给组件的 render 函数创建一个 effect（当组件更新的时候，会执行 update 方法）
     const effect = (instance.effect = new ReactiveEffect(
       componentUpdateFn,
-      () => queueJob(update),
+      () => queueJob(update), // 类似于 watch，将 update 方法推入一个执行队列，并包装成 promise
       instance.scope // track it in component's effect scope
     ))
 
+    // 创建一个 update 方法
+    // 执行方法之后会执行 effect.run，相当于执行 componentUpdateFn，并设置 activeEffect
     const update: SchedulerJob = (instance.update = () => effect.run())
     update.id = instance.uid
     // allowRecurse
@@ -1696,9 +1770,16 @@ function baseCreateRenderer(
       update.ownerInstance = instance
     }
 
+    // 执行 update 方法，建立 render 跟 effect 之间的关联
     update()
   }
 
+  /**
+   * 在渲染前更新组件
+   * @param instance
+   * @param nextVNode
+   * @param optimized
+   */
   const updateComponentPreRender = (
     instance: ComponentInternalInstance,
     nextVNode: VNode,

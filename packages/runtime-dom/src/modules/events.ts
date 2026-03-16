@@ -65,11 +65,11 @@ export function removeEventListener(
 /**
  * 更新监听的函数
  * 其实就是通过 addEventListener 和 removeEventListener 添加和删除事件监听
- * @param el 
+ * @param el
  * @param rawName 监听的事件类型，比如 click，change 等
  * @param prevValue 旧的事件监听的具体方法
  * @param nextValue 新的事件监听的具体方法
- * @param instance 
+ * @param instance
  */
 export function patchEvent(
   el: Element & { _vei?: Record<string, Invoker | undefined> },
@@ -83,14 +83,15 @@ export function patchEvent(
   const existingInvoker = invokers[rawName]
   // 如果有新的监听方法实现，并且存在旧的
   if (nextValue && existingInvoker) {
-    // 直接替换
+    // 直接替换，因为 invoker.value 存储的才是业务中的监听方法
     existingInvoker.value = nextValue
   } else {
     const [name, options] = parseName(rawName)
     // 有新的，但是没有旧的事件监听函数，则创建一个方法，通过 addEventListener 发起监听
     if (nextValue) {
-      // add
+      // 新增事件监听，通过 createInvoker 创建 invoker
       const invoker = (invokers[rawName] = createInvoker(nextValue, instance))
+      // eventListener 监听的是 invoker 方法
       addEventListener(el, name, invoker, options)
     } else if (existingInvoker) {
       // 如果没有新的监听，则移除旧的
@@ -115,6 +116,12 @@ function parseName(name: string): [string, EventListenerOptions | undefined] {
   return [hyphenate(name.slice(2)), options]
 }
 
+/**
+ * 创建事件监听 invoker
+ * @param initialValue 
+ * @param instance 
+ * @returns 
+ */
 function createInvoker(
   initialValue: EventValue,
   instance: ComponentInternalInstance | null
@@ -129,6 +136,7 @@ function createInvoker(
     const timeStamp = e.timeStamp || _getNow()
 
     if (skipTimestampCheck || timeStamp >= invoker.attached - 1) {
+      // 执行 invoker.value 方法
       callWithAsyncErrorHandling(
         patchStopImmediatePropagation(e, invoker.value),
         instance,
@@ -137,6 +145,7 @@ function createInvoker(
       )
     }
   }
+  // 将业务中的事件执行函数添加到 invoker.value 属性上
   invoker.value = initialValue
   invoker.attached = getNow()
   return invoker

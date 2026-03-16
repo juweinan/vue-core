@@ -40,6 +40,11 @@ export function markAttrsAccessed() {
 
 type SetRootFn = ((root: VNode) => void) | undefined
 
+/**
+ * 渲染组件的根，并返回
+ * @param instance
+ * @returns
+ */
 export function renderComponentRoot(
   instance: ComponentInternalInstance
 ): VNode {
@@ -69,6 +74,7 @@ export function renderComponentRoot(
   }
 
   try {
+    // 如果是有状态的组件，创建并格式化 vnode
     if (vnode.shapeFlag & ShapeFlags.STATEFUL_COMPONENT) {
       // withProxy is a proxy with a different `has` trap only for
       // runtime-compiled render functions using `with` block.
@@ -92,6 +98,7 @@ export function renderComponentRoot(
       if (__DEV__ && attrs === props) {
         markAttrsAccessed()
       }
+      // 如果存在 render 函数，则执行 render 并得到一个标准化的 vnode
       result = normalizeVNode(
         render.length > 1
           ? render(
@@ -119,9 +126,8 @@ export function renderComponentRoot(
     result = createVNode(Comment)
   }
 
-  // attr merging
-  // in dev mode, comments are preserved, and it's possible for a template
-  // to have comments along side the root element which makes it a fragment
+  // 合并属性
+  // 在开发模式下，注释会被保留，模板可以在根元素旁边添加注释，使其成为一个片段
   let root = result
   let setRoot: SetRootFn = undefined
   if (
@@ -138,9 +144,7 @@ export function renderComponentRoot(
     if (keys.length) {
       if (shapeFlag & (ShapeFlags.ELEMENT | ShapeFlags.COMPONENT)) {
         if (propsOptions && keys.some(isModelListener)) {
-          // If a v-model listener (onUpdate:xxx) has a corresponding declared
-          // prop, it indicates this component expects to handle v-model and
-          // it should not fallthrough.
+          // 如果v-model监听器（onUpdate:xxx）有一个相应的声明prop，则表示该组件希望处理v-model，并且不应该出错。
           // related: #1543, #1643, #1989
           fallthroughAttrs = filterModelListeners(
             fallthroughAttrs,
@@ -320,6 +324,16 @@ const isElementRoot = (vnode: VNode) => {
   )
 }
 
+/**
+ * 判断组件是否需要更新
+ * 1. 是否存在指令或者动画
+ * 2. 是否存在 patchFlag
+ * 3. 判断 children 和 props 是否发生了变化
+ * @param prevVNode 
+ * @param nextVNode 
+ * @param optimized 
+ * @returns 
+ */
 export function shouldUpdateComponent(
   prevVNode: VNode,
   nextVNode: VNode,

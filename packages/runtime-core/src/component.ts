@@ -459,16 +459,26 @@ const emptyAppContext = createAppContext()
 
 let uid = 0
 
+/**
+ * 创建组件实例对象（只是创建组件实例对象的各种属性，没有其他额外的操作）
+ * @param vnode 
+ * @param parent 
+ * @param suspense 
+ * @returns 
+ */
 export function createComponentInstance(
   vnode: VNode,
   parent: ComponentInternalInstance | null,
   suspense: SuspenseBoundary | null
 ) {
+  // 组件的类型
+  // 是一个对象，包含了 setup、props、render 等等
   const type = vnode.type as ConcreteComponent
   // inherit parent app context - or - if root, adopt from root vnode
   const appContext =
     (parent ? parent.appContext : vnode.appContext) || emptyAppContext
 
+  // 组件实例对象 instance.vnode 可以访问到 vnode
   const instance: ComponentInternalInstance = {
     uid: uid++,
     vnode,
@@ -565,6 +575,10 @@ export let currentInstance: ComponentInternalInstance | null = null
 export const getCurrentInstance: () => ComponentInternalInstance | null = () =>
   currentInstance || currentRenderingInstance
 
+/**
+ * 高亮当前组件实例（放在全局对象中，类似于 activeEffect）
+ * @param instance 
+ */
 export const setCurrentInstance = (instance: ComponentInternalInstance) => {
   currentInstance = instance
   instance.scope.on()
@@ -586,12 +600,23 @@ export function validateComponentName(name: string, config: AppConfig) {
   }
 }
 
+/**
+ * 是否是有状态的组件
+ * @param instance 
+ * @returns 
+ */
 export function isStatefulComponent(instance: ComponentInternalInstance) {
   return instance.vnode.shapeFlag & ShapeFlags.STATEFUL_COMPONENT
 }
 
 export let isInSSRComponentSetup = false
 
+/**
+ * 执行组件的 setup 方法，返回组件构建后的结果
+ * @param instance 
+ * @param isSSR 
+ * @returns 
+ */
 export function setupComponent(
   instance: ComponentInternalInstance,
   isSSR = false
@@ -599,10 +624,14 @@ export function setupComponent(
   isInSSRComponentSetup = isSSR
 
   const { props, children } = instance.vnode
+  // 是否是有状态的组件（组件中存在 data 属性或者其他响应式数据，代表这是个有状态组件）
   const isStateful = isStatefulComponent(instance)
+  // 初始化 props（给组件的 setup 方法注入 props 属性）
   initProps(instance, props, isStateful, isSSR)
+  // 初始化 slots（给组件方法注入 slots 属性）
   initSlots(instance, children)
 
+  // setup 函数执行结果（如果是无状态组件，结果就是 undefined）
   const setupResult = isStateful
     ? setupStatefulComponent(instance, isSSR)
     : undefined
@@ -610,10 +639,19 @@ export function setupComponent(
   return setupResult
 }
 
+/**
+ * 执行有状态组件中的 setup 方法
+ * 得到 setup 方法中的属性或者 render 函数
+ * 根据 template 模板，编译出组件的 render 函数
+ * @param instance 
+ * @param isSSR 
+ * @returns 
+ */
 function setupStatefulComponent(
   instance: ComponentInternalInstance,
   isSSR: boolean
 ) {
+  // 就是 vnode.type
   const Component = instance.type as ComponentOptions
 
   if (__DEV__) {
@@ -642,29 +680,40 @@ function setupStatefulComponent(
   }
   // 0. create render proxy property access cache
   instance.accessCache = Object.create(null)
-  // 1. create public instance / render proxy
-  // also mark it raw so it's never observed
+  // 1. 这里面的 PublicInstanceProxyHandlers 其实就是处理 render 中访问的 this
+  // 如果在 render 或者 template 中访问 this.xxx，那么就会到实例对象的 setupState => data => props => ctx 依次查找对应的属性
+  // 所以说，在组件里使用的 this 就是则个被代理过的 instance 
   instance.proxy = markRaw(new Proxy(instance.ctx, PublicInstanceProxyHandlers))
   if (__DEV__) {
     exposePropsOnRenderContext(instance)
   }
-  // 2. call setup()
+  // 2. call setup() 执行 setup 方法
   const { setup } = Component
+  // 如果 setup 存在，执行 setup 方法，并处理返回结果
   if (setup) {
+    // setup 上下文（函数参数）
     const setupContext = (instance.setupContext =
       setup.length > 1 ? createSetupContext(instance) : null)
 
+    // 高亮当前组件实例
     setCurrentInstance(instance)
+    // 暂停依赖收集
+    // 应该是因为执行 setup 后，返回的数据里会访问响应式属性
+    // 这个时候的访问，是不需要收集依赖的
     pauseTracking()
+    // 执行 setup 方法，并拿到返回值
     const setupResult = callWithErrorHandling(
       setup,
       instance,
       ErrorCodes.SETUP_FUNCTION,
       [__DEV__ ? shallowReadonly(instance.props) : instance.props, setupContext]
     )
+    // setup 执行完了，就恢复依赖收集
     resetTracking()
+    // 取消高亮当前组件实例
     unsetCurrentInstance()
 
+    // 如果 setup 返回值是一个 promise
     if (isPromise(setupResult)) {
       setupResult.then(unsetCurrentInstance, unsetCurrentInstance)
       if (isSSR) {
@@ -678,7 +727,7 @@ function setupStatefulComponent(
           })
       } else if (__FEATURE_SUSPENSE__) {
         // async setup returned Promise.
-        // bail here and wait for re-entry.
+        // 在此取保候审，等待重新入境.
         instance.asyncDep = setupResult
         if (__DEV__ && !instance.suspense) {
           const name = Component.name ?? 'Anonymous'
@@ -696,18 +745,29 @@ function setupStatefulComponent(
         )
       }
     } else {
+      // 处理 setup 的返回值
       handleSetupResult(instance, setupResult, isSSR)
     }
   } else {
+    // 完整组件的构建
     finishComponentSetup(instance, isSSR)
   }
 }
 
+/**
+ * 处理 setup 的返回值
+ * 1. 函数类型：表示这是个 render
+ * 2. 对象类型：通过 proxy 处理返回值。在 get 中会对 ref 类型解包，返回 ref.value；在 set 中如果是 ref 类型会执行 ref.value = newValue
+ * @param instance 
+ * @param setupResult 
+ * @param isSSR 
+ */
 export function handleSetupResult(
   instance: ComponentInternalInstance,
   setupResult: unknown,
   isSSR: boolean
 ) {
+  // 如果返回的是个函数，那么直接当成 render 函数使用（这个 render 是放在 instance 实力上的）
   if (isFunction(setupResult)) {
     // setup returned an inline render function
     if (__SSR__ && (instance.type as ComponentOptions).__ssrInlineRender) {
@@ -729,6 +789,9 @@ export function handleSetupResult(
     if (__DEV__ || __FEATURE_PROD_DEVTOOLS__) {
       instance.devtoolsRawSetupState = setupResult
     }
+    // 调用 proxyRefs 方法，对 setup 的返回值进行解包（不过不是立即解包，而是在访问的时候解包）
+    // 也是通过 proxy 代理处理的 setupResult
+    // setupState 就是 setup 返回的属性和方法
     instance.setupState = proxyRefs(setupResult)
     if (__DEV__) {
       exposeSetupStateOnRenderContext(instance)
@@ -740,6 +803,7 @@ export function handleSetupResult(
       }`
     )
   }
+  // 完成组件的构建
   finishComponentSetup(instance, isSSR)
 }
 
@@ -767,11 +831,21 @@ export function registerRuntimeCompiler(_compile: any) {
 // dev only
 export const isRuntimeOnly = () => !compile
 
+/**
+ * 完成/结束组件的 setup
+ * 主要生成组件实例的 render 方法
+ * 如果 setup 函数的返回值是 function 类型，那么这个方法就没有什么意义了
+ * 但是通常 setup 方法只返回一个对象，所以需要根据组件的 template 编译出来一个 render 函数
+ * @param instance 
+ * @param isSSR 
+ * @param skipOptions 
+ */
 export function finishComponentSetup(
   instance: ComponentInternalInstance,
   isSSR: boolean,
   skipOptions?: boolean
 ) {
+  // vnode.type
   const Component = instance.type as ComponentOptions
 
   if (__COMPAT__) {
@@ -784,10 +858,14 @@ export function finishComponentSetup(
 
   // template / render function normalization
   // could be already set when returned from setup()
+  // 如果实例上没有 render 方法（如果 setup 返回的是一个方法，那么就会作为 instance.render）
+  // 但是如果返回的不是 function，那么就说明需要生成一个 render
   if (!instance.render) {
     // only do on-the-fly compile if not in SSR - SSR on-the-fly compilation
     // is done by server-renderer
+    // 如果组件上也没有 render，那么就解析 template 模板，然后生成一个 render 函数
     if (!isSSR && compile && !Component.render) {
+      // 获取组件的渲染模板
       const template =
         (__COMPAT__ &&
           instance.vnode.props &&
@@ -800,6 +878,7 @@ export function finishComponentSetup(
         const { isCustomElement, compilerOptions } = instance.appContext.config
         const { delimiters, compilerOptions: componentCompilerOptions } =
           Component
+        // 编译的配置选项
         const finalCompilerOptions: CompilerOptions = extend(
           extend(
             {
@@ -817,6 +896,7 @@ export function finishComponentSetup(
             extend(finalCompilerOptions.compatConfig, Component.compatConfig)
           }
         }
+        // 调用 compile 方法编译 template 模板
         Component.render = compile(template, finalCompilerOptions)
         if (__DEV__) {
           endMeasure(instance, `compile`)
@@ -824,6 +904,8 @@ export function finishComponentSetup(
       }
     }
 
+    // 将解析 template 获取的 render 添加到 instance.render 上
+    // Component 的 render 可能是开发中给组件对象写的那个 render 函数
     instance.render = (Component.render || NOOP) as InternalRenderFunction
 
     // for runtime-compiled render functions using `with` blocks, the render
@@ -834,7 +916,7 @@ export function finishComponentSetup(
     }
   }
 
-  // support for 2.x options
+  // 对 Vue2 的 options 属性支持（不用看）
   if (__FEATURE_OPTIONS_API__ && !(__COMPAT__ && skipOptions)) {
     setCurrentInstance(instance)
     pauseTracking()
@@ -893,6 +975,12 @@ function createAttrsProxy(instance: ComponentInternalInstance): Data {
   )
 }
 
+/**
+ * 创建 setup 方法上下文
+ * 也就是执行 setup 时，能拿到的参数
+ * @param instance 
+ * @returns 
+ */
 export function createSetupContext(
   instance: ComponentInternalInstance
 ): SetupContext {

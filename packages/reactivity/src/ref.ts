@@ -175,6 +175,11 @@ export function unref<T>(ref: T | Ref<T>): T {
   return isRef(ref) ? (ref.value as any) : ref
 }
 
+/**
+ * 浅解包处理器
+ * get: 如果属性值是 ref，则返回 ref.value；否则直接返回
+ * set: 如果是 ref，则修改 ref.value；否则调用 Reflect.set()
+ */
 const shallowUnwrapHandlers: ProxyHandler<any> = {
   get: (target, key, receiver) => unref(Reflect.get(target, key, receiver)),
   set: (target, key, value, receiver) => {
