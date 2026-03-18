@@ -101,18 +101,33 @@ export interface ParserContext {
   onWarn: NonNullable<ErrorHandlingOptions['onWarn']>
 }
 
+/**
+ * 解析 template 为 AST 入口
+ * @param content
+ * @param options
+ * @returns
+ */
 export function baseParse(
   content: string,
   options: ParserOptions = {}
 ): RootNode {
+  // 把 template 转换成解析是需要的描述对象
   const context = createParserContext(content, options)
+  // 获取开始位置
   const start = getCursor(context)
+  // 创建根节点
   return createRoot(
     parseChildren(context, TextModes.DATA, []),
     getSelection(context, start)
   )
 }
 
+/**
+ * 创建解析 template 的描述对象
+ * @param content
+ * @param rawOptions
+ * @returns
+ */
 function createParserContext(
   content: string,
   rawOptions: ParserOptions
@@ -131,26 +146,37 @@ function createParserContext(
     options,
     column: 1,
     line: 1,
-    offset: 0,
-    originalSource: content,
-    source: content,
+    offset: 0, // 当前解析的位置
+    originalSource: content, // 最初的 template 文本
+    source: content, // 当前还需要解析的 template 文本
     inPre: false,
     inVPre: false,
     onWarn: options.onWarn
   }
 }
 
+/**
+ * 解析子节点（解析 template 的核心入口）
+ * @param context 包含被解析的 template 的描述对象
+ * @param mode 模式，默认是元素节点
+ * @param ancestors 祖先节点，默认是 []
+ * @returns
+ */
 function parseChildren(
   context: ParserContext,
   mode: TextModes,
   ancestors: ElementNode[]
 ): TemplateChildNode[] {
+  // 最后一个祖先
   const parent = last(ancestors)
+  // 默认是 html，也就是根节点
   const ns = parent ? parent.ns : Namespaces.HTML
   const nodes: TemplateChildNode[] = []
 
+  // 如果没匹配到结束标签
   while (!isEnd(context, mode, ancestors)) {
     __TEST__ && assert(context.source.length > 0)
+    // 拿到剩余的 template
     const s = context.source
     let node: TemplateChildNode | TemplateChildNode[] | undefined = undefined
 
@@ -158,14 +184,17 @@ function parseChildren(
       if (!context.inVPre && startsWith(s, context.options.delimiters[0])) {
         // '{{'
         node = parseInterpolation(context, mode)
+        // 如果是以 < 开始的，表示匹配到了开始节点
       } else if (mode === TextModes.DATA && s[0] === '<') {
         // https://html.spec.whatwg.org/multipage/parsing.html#tag-open-state
         if (s.length === 1) {
+          // 如果只有这一个字符，则报错
           emitError(context, ErrorCodes.EOF_BEFORE_TAG_NAME, 1)
         } else if (s[1] === '!') {
+          // <! 标签，如果是这种情况基本都不是普通的 element 元素节点
           // https://html.spec.whatwg.org/multipage/parsing.html#markup-declaration-open-state
           if (startsWith(s, '<!--')) {
-            node = parseComment(context)
+            node = parseComment(context) // 解析注释
           } else if (startsWith(s, '<!DOCTYPE')) {
             // Ignore DOCTYPE by a limitation.
             node = parseBogusComment(context)
@@ -181,15 +210,21 @@ function parseChildren(
             node = parseBogusComment(context)
           }
         } else if (s[1] === '/') {
+          // </ 表示这是一个结束标签
           // https://html.spec.whatwg.org/multipage/parsing.html#end-tag-open-state
           if (s.length === 2) {
+            // 只有 </ 报错
             emitError(context, ErrorCodes.EOF_BEFORE_TAG_NAME, 2)
           } else if (s[2] === '>') {
+            // </> 也报错，缺失结束标签 tag
             emitError(context, ErrorCodes.MISSING_END_TAG_NAME, 2)
+            // 删除掉这 3 个字符，并修改 content 中游标的位置
             advanceBy(context, 3)
             continue
           } else if (/[a-z]/i.test(s[2])) {
+            // 这里为什么报错
             emitError(context, ErrorCodes.X_INVALID_END_TAG)
+            // 解析 tag 标签名
             parseTag(context, TagType.End, parent)
             continue
           } else {
@@ -501,6 +536,7 @@ const isSpecialTemplateDirective = /*#__PURE__*/ makeMap(
 
 /**
  * Parse a tag (E.g. `<div id=a>`) with that type (start tag or end tag).
+ * 根据开始标签或者结束标签解析出标签的 tag
  */
 function parseTag(
   context: ParserContext,
@@ -526,13 +562,15 @@ function parseTag(
   // Tag open.
   const start = getCursor(context)
   const match = /^<\/?([a-z][^\t\r\n\f />]*)/i.exec(context.source)!
+  // 拿到标签名
   const tag = match[1]
   const ns = context.options.getNamespace(tag, parent)
 
+  // 游标后移
   advanceBy(context, match[0].length)
   advanceSpaces(context)
 
-  // save current state in case we need to re-parse attributes with v-pre
+  // 保存当前状态，以防我们需要使用v-pre重新解析属性
   const cursor = getCursor(context)
   const currentSource = context.source
 
@@ -701,12 +739,15 @@ function parseAttributes(
 ): (AttributeNode | DirectiveNode)[] {
   const props = []
   const attributeNames = new Set<string>()
+  // 剩余的 template 还存在，并且剩余的 template 不是开始的结束标志，也不是单标签的结束标志
   while (
     context.source.length > 0 &&
     !startsWith(context.source, '>') &&
     !startsWith(context.source, '/>')
   ) {
+    // 如果是 / 开始，但不是 /> 开始
     if (startsWith(context.source, '/')) {
+      // 提示错误，并删除 / 这一个符号
       emitError(context, ErrorCodes.UNEXPECTED_SOLIDUS_IN_TAG)
       advanceBy(context, 1)
       advanceSpaces(context)
@@ -1056,11 +1097,23 @@ function parseTextData(
   }
 }
 
+/**
+ * 获取当前位置（当前解析 template 所处的位置）
+ * @param context
+ * @returns
+ */
 function getCursor(context: ParserContext): Position {
   const { column, line, offset } = context
   return { column, line, offset }
 }
 
+/**
+ * 获取开始到结束这段 template
+ * @param context
+ * @param start
+ * @param end
+ * @returns
+ */
 function getSelection(
   context: ParserContext,
   start: Position,
@@ -1082,13 +1135,24 @@ function startsWith(source: string, searchString: string): boolean {
   return source.startsWith(searchString)
 }
 
+/**
+ * 修改 template 上下文对象（剩余需要解析的文本，游标的位置）
+ * @param context 被修改的 template 描述对象
+ * @param numberOfCharacters 需要移动的字符数
+ */
 function advanceBy(context: ParserContext, numberOfCharacters: number): void {
   const { source } = context
   __TEST__ && assert(numberOfCharacters <= source.length)
+  // 按照 numberOfCharacters 修改游标
   advancePositionWithMutation(context, source, numberOfCharacters)
+  // 删除掉 source 中前 numberOfCharacters 个字符
   context.source = source.slice(numberOfCharacters)
 }
 
+/**
+ * 跳过空格
+ * @param context 
+ */
 function advanceSpaces(context: ParserContext): void {
   const match = /^[\t\r\n\f ]+/.exec(context.source)
   if (match) {
@@ -1127,6 +1191,13 @@ function emitError(
   )
 }
 
+/**
+ * 是否结束
+ * @param context
+ * @param mode
+ * @param ancestors
+ * @returns
+ */
 function isEnd(
   context: ParserContext,
   mode: TextModes,
@@ -1135,6 +1206,7 @@ function isEnd(
   const s = context.source
 
   switch (mode) {
+    // 如果是 element 标签，则匹配到 '</' 表示匹配到了结束标签，然后找到最近的开始标签，标志着当前标签已经结束了
     case TextModes.DATA:
       if (startsWith(s, '</')) {
         // TODO: probably bad performance
@@ -1146,6 +1218,7 @@ function isEnd(
       }
       break
 
+    // 如果是特殊标签节点，则直接找上一个祖先标签（style、script、textarea 等标签），标记着当前标签结束了
     case TextModes.RCDATA:
     case TextModes.RAWTEXT: {
       const parent = last(ancestors)

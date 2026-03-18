@@ -56,8 +56,12 @@ export function getBaseTransformPreset(
   ]
 }
 
-// we name it `baseCompile` so that higher order compilers like
-// @vue/compiler-dom can export `compile` while re-exporting everything else.
+/**
+ * 编译 template 模版为 render 函数的入口
+ * @param template 
+ * @param options 
+ * @returns 
+ */
 export function baseCompile(
   template: string | RootNode,
   options: CompilerOptions = {}
@@ -82,6 +86,7 @@ export function baseCompile(
     onError(createCompilerError(ErrorCodes.X_SCOPE_ID_NOT_SUPPORTED))
   }
 
+  // 1. template -> ast
   const ast = isString(template) ? baseParse(template, options) : template
   const [nodeTransforms, directiveTransforms] =
     getBaseTransformPreset(prefixIdentifiers)
@@ -93,6 +98,7 @@ export function baseCompile(
     }
   }
 
+  // 2. ast -> javascript ast
   transform(
     ast,
     extend({}, options, {
@@ -109,6 +115,7 @@ export function baseCompile(
     })
   )
 
+  // 3. javascript ast -> render function
   return generate(
     ast,
     extend({}, options, {
