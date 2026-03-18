@@ -195,14 +195,26 @@ export interface DirectiveNode extends Node {
 }
 
 /**
- * Static types have several levels.
- * Higher levels implies lower levels. e.g. a node that can be stringified
- * can always be hoisted and skipped for patch.
+ * 静态类型有几个级别。
+ * 更高的水平意味着更低的水平。
+ * 例如，可以串化的节点总是可以被提升并跳过以进行补丁。
  */
 export const enum ConstantTypes {
+  /**
+   * 不恒定
+   */
   NOT_CONSTANT = 0,
+  /**
+   * 能跳过 patch
+   */
   CAN_SKIP_PATCH,
+  /**
+   * 能提升
+   */
   CAN_HOIST,
+  /**
+   * 能字符串化
+   */
   CAN_STRINGIFY
 }
 

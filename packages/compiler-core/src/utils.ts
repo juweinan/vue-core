@@ -325,6 +325,11 @@ export function isTemplateNode(
   )
 }
 
+/**
+ * 是否是 slot 节点 <slot></slot>
+ * @param node 
+ * @returns 
+ */
 export function isSlotOutlet(
   node: RootNode | TemplateChildNode
 ): node is SlotOutletNode {

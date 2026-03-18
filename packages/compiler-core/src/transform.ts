@@ -122,6 +122,12 @@ export interface TransformContext
   filters?: Set<string>
 }
 
+/**
+ * 创建 transform 上下文
+ * @param root
+ * @param param1
+ * @returns
+ */
 export function createTransformContext(
   root: RootNode,
   {
@@ -150,16 +156,16 @@ export function createTransformContext(
 ): TransformContext {
   const nameMatch = filename.replace(/\?.*$/, '').match(/([^/\\]+)\.\w+$/)
   const context: TransformContext = {
-    // options
+    // options 配置选项
     selfName: nameMatch && capitalize(camelize(nameMatch[1])),
     prefixIdentifiers,
-    hoistStatic,
+    hoistStatic, // 静态提升
     cacheHandlers,
     nodeTransforms,
     directiveTransforms,
     transformHoist,
     isBuiltInComponent,
-    isCustomElement,
+    isCustomElement, // 是否是自定义元素节点
     expressionPlugins,
     scopeId,
     slotted,
@@ -173,14 +179,14 @@ export function createTransformContext(
     onWarn,
     compatConfig,
 
-    // state
-    root,
+    // state 状态
+    root, // JavaScript AST 的根就是 AST
     helpers: new Map(),
     components: new Set(),
     directives: new Set(),
-    hoists: [],
+    hoists: [], // 静态提升数组
     imports: [],
-    constantCache: new Map(),
+    constantCache: new Map(), // 缓存的是永恒不变的节点
     temps: 0,
     cached: 0,
     identifiers: Object.create(null),
@@ -191,7 +197,7 @@ export function createTransformContext(
       vOnce: 0
     },
     parent: null,
-    currentNode: root,
+    currentNode: root, // 当前所代表的节点
     childIndex: 0,
     inVOnce: false,
 
@@ -314,9 +320,17 @@ export function createTransformContext(
   return context
 }
 
+/**
+ * 将 ast 编译成 javascript ast
+ * @param root ast
+ * @param options
+ */
 export function transform(root: RootNode, options: TransformOptions) {
+  // 初始化根 ast 转换后的 JavaScript AST（这时还都是默认参数）
   const context = createTransformContext(root, options)
+  // 遍历节点
   traverseNode(root, context)
+  // 如果是静态提升的节点
   if (options.hoistStatic) {
     hoistStatic(root, context)
   }
@@ -387,6 +401,11 @@ function createRootCodegen(root: RootNode, context: TransformContext) {
   }
 }
 
+/**
+ * 遍历子节点，每个执行 traverseNode
+ * @param parent 
+ * @param context 
+ */
 export function traverseChildren(
   parent: ParentNode,
   context: TransformContext
@@ -405,16 +424,25 @@ export function traverseChildren(
   }
 }
 
+/**
+ * 遍历节点
+ * @param node 当前遍历的 AST
+ * @param context 当前 AST 对应的 JavaScript AST
+ * @returns 
+ */
 export function traverseNode(
   node: RootNode | TemplateChildNode,
   context: TransformContext
 ) {
+  // 当前遍历的 AST 存放在 currentNode 上
   context.currentNode = node
-  // apply transform plugins
+  // 使用插件（默认是空的）
   const { nodeTransforms } = context
   const exitFns = []
   for (let i = 0; i < nodeTransforms.length; i++) {
+    // 执行 nodeTransforms 中的方法，得到一个 onExit
     const onExit = nodeTransforms[i](node, context)
+    // 添加到 exitFns 中
     if (onExit) {
       if (isArray(onExit)) {
         exitFns.push(...onExit)
@@ -422,32 +450,38 @@ export function traverseNode(
         exitFns.push(onExit)
       }
     }
+    // 如果当前 node 不存在，说明被删除了
+    // 难道说上面的遍历，会清除 node？？？
     if (!context.currentNode) {
       // node was removed
       return
     } else {
-      // node may have been replaced
+      // node 可能被替换掉了
       node = context.currentNode
     }
   }
 
+  // 根据 node 的类型处理
   switch (node.type) {
+    // 如果是注释类型的节点
     case NodeTypes.COMMENT:
       if (!context.ssr) {
-        // inject import for the Comment symbol, which is needed for creating
-        // comment nodes with `createVNode`
+        // 为 Comment 符号注入 import，这是使用 `createVNode 创建注释节点所必需的`
         context.helper(CREATE_COMMENT)
       }
       break
+    // interpolation
     case NodeTypes.INTERPOLATION:
-      // no need to traverse, but we need to inject toString helper
+      // 无需遍历，但我们需要注入 toString 辅助函数
       if (!context.ssr) {
         context.helper(TO_DISPLAY_STRING)
       }
       break
 
-    // for container types, further traverse downwards
+    // 对于容器类型，进一步向下遍历
     case NodeTypes.IF:
+      // 如果是 if 逻辑判断
+      // 这里的 branches 应该是所有的条件分支（所有每个都要遍历一遍）
       for (let i = 0; i < node.branches.length; i++) {
         traverseNode(node.branches[i], context)
       }
@@ -456,11 +490,12 @@ export function traverseNode(
     case NodeTypes.FOR:
     case NodeTypes.ELEMENT:
     case NodeTypes.ROOT:
+      // 遍历子节点
       traverseChildren(node, context)
       break
   }
 
-  // exit transforms
+  // 推出 transform
   context.currentNode = node
   let i = exitFns.length
   while (i--) {

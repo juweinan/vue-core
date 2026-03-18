@@ -182,7 +182,7 @@ function parseChildren(
 
     if (mode === TextModes.DATA || mode === TextModes.RCDATA) {
       if (!context.inVPre && startsWith(s, context.options.delimiters[0])) {
-        // '{{'
+        // '{{' 匹配到了 {{ }} 的开始
         node = parseInterpolation(context, mode)
         // 如果是以 < 开始的，表示匹配到了开始节点
       } else if (mode === TextModes.DATA && s[0] === '<') {
@@ -224,7 +224,7 @@ function parseChildren(
           } else if (/[a-z]/i.test(s[2])) {
             // 这里为什么报错
             emitError(context, ErrorCodes.X_INVALID_END_TAG)
-            // 解析 tag 标签名
+            // 解析 tag 结束标签名
             parseTag(context, TagType.End, parent)
             continue
           } else {
@@ -233,9 +233,11 @@ function parseChildren(
               ErrorCodes.INVALID_FIRST_CHARACTER_OF_TAG_NAME,
               2
             )
+            // 注释？
             node = parseBogusComment(context)
           }
         } else if (/[a-z]/i.test(s[1])) {
+          // 开始标签
           node = parseElement(context, ancestors)
 
           // 2.x <template> with no directive compat
@@ -262,6 +264,7 @@ function parseChildren(
             node = node.children
           }
         } else if (s[1] === '?') {
+          // <? 标签，这是什么东西
           emitError(
             context,
             ErrorCodes.UNEXPECTED_QUESTION_MARK_INSTEAD_OF_TAG_NAME,
@@ -273,10 +276,12 @@ function parseChildren(
         }
       }
     }
+    // 如果没匹配到，那么说明这是个文本节点
     if (!node) {
       node = parseText(context, mode)
     }
 
+    // 添加子节点
     if (isArray(node)) {
       for (let i = 0; i < node.length; i++) {
         pushNode(nodes, node[i])
@@ -338,6 +343,7 @@ function parseChildren(
     }
   }
 
+  // 去除空节点
   return removedWhitespace ? nodes.filter(Boolean) : nodes
 }
 
@@ -452,14 +458,17 @@ function parseElement(
 ): ElementNode | undefined {
   __TEST__ && assert(/^<[a-z]/i.test(context.source))
 
-  // Start tag.
+  // 开始标签名
   const wasInPre = context.inPre
   const wasInVPre = context.inVPre
+  // 当前节点的父节点
   const parent = last(ancestors)
+  // 解析开始节点的标签（包含了标签类型基本固定是 element，标签名，标签名类型，props 等）
   const element = parseTag(context, TagType.Start, parent)
   const isPreBoundary = context.inPre && !wasInPre
   const isVPreBoundary = context.inVPre && !wasInVPre
 
+  // 如果标签是自闭合的
   if (element.isSelfClosing || context.options.isVoidTag(element.tag)) {
     // #4030 self-closing <pre> tag
     if (isPreBoundary) {
@@ -472,9 +481,13 @@ function parseElement(
   }
 
   // Children.
+  // 将当前解析出来的开始标签添加到祖先节点列表中（目的是确定下一个子节点的父节点）
+  // 直到匹配到结束节点，并且 ancestors 中的最后一个跟结束节点的 tag 匹配，就表示当前节点已经完全闭合了
   ancestors.push(element)
   const mode = context.options.getTextMode(element, parent)
+  // 继续递归下一个子节点
   const children = parseChildren(context, mode, ancestors)
+  // 等到子节点处理完了，把 element 从栈里弹出
   ancestors.pop()
 
   // 2.x inline-template compat
@@ -499,9 +512,11 @@ function parseElement(
     }
   }
 
+  // 添加子节点
   element.children = children
 
-  // End tag.
+  // 如果是结束标签，那么久解析结束标签
+  // 因为解析完了子节点之后，肯定是结束标签
   if (startsWithEndTagOpen(context.source, element.tag)) {
     parseTag(context, TagType.End, parent)
   } else {
@@ -522,6 +537,7 @@ function parseElement(
   if (isVPreBoundary) {
     context.inVPre = false
   }
+  // 完整的标签匹配结束
   return element
 }
 
@@ -579,7 +595,7 @@ function parseTag(
     context.inPre = true
   }
 
-  // Attributes.
+  // Attributes. 解析 attrs 属性
   let props = parseAttributes(context, type)
 
   // check v-pre
@@ -597,17 +613,20 @@ function parseTag(
   }
 
   // Tag close.
-  let isSelfClosing = false
+  let isSelfClosing = false // 是否是单标签
   if (context.source.length === 0) {
     emitError(context, ErrorCodes.EOF_IN_TAG)
   } else {
     isSelfClosing = startsWith(context.source, '/>')
+    // 如果当前是结束标签，并且还是自闭合的标签，报错
+    // 因为结束标签不可能同时是自闭合标签
     if (type === TagType.End && isSelfClosing) {
       emitError(context, ErrorCodes.END_TAG_WITH_TRAILING_SOLIDUS)
     }
     advanceBy(context, isSelfClosing ? 2 : 1)
   }
 
+  // 结束标签，后面的就不需要处理了
   if (type === TagType.End) {
     return
   }
@@ -643,11 +662,14 @@ function parseTag(
     }
   }
 
+  // 标签类型默认是 element 元素节点
   let tagType = ElementTypes.ELEMENT
   if (!context.inVPre) {
     if (tag === 'slot') {
+      // 插槽
       tagType = ElementTypes.SLOT
     } else if (tag === 'template') {
+      // template 标签
       if (
         props.some(
           p =>
@@ -657,20 +679,21 @@ function parseTag(
         tagType = ElementTypes.TEMPLATE
       }
     } else if (isComponent(tag, props, context)) {
+      // 组件标签
       tagType = ElementTypes.COMPONENT
     }
   }
 
   return {
-    type: NodeTypes.ELEMENT,
+    type: NodeTypes.ELEMENT, // 节点类型
     ns,
-    tag,
-    tagType,
-    props,
+    tag, // 标签名
+    tagType, // 标签类型
+    props, // 标签上的属性
     isSelfClosing,
     children: [],
     loc: getSelection(context, start),
-    codegenNode: undefined // to be created during transform phase
+    codegenNode: undefined // 在 transform 阶段被创建
   }
 }
 
@@ -733,6 +756,15 @@ function isComponent(
   }
 }
 
+/**
+ * 解析标签中的属性
+ * 1. 只有标签类型是开始标签时，才能有属性可以匹配
+ * 2. 标签类型是结束标签时，不可能能够匹配属性
+ * 3. 属性包含元素属性，bind 属性，on 方法属性，slot 属性等等
+ * @param context
+ * @param type
+ * @returns
+ */
 function parseAttributes(
   context: ParserContext,
   type: TagType
@@ -740,6 +772,7 @@ function parseAttributes(
   const props = []
   const attributeNames = new Set<string>()
   // 剩余的 template 还存在，并且剩余的 template 不是开始的结束标志，也不是单标签的结束标志
+  // 也就是说，只能处理 <tagName 后面的，以及 > 或者 /> 前面的部分
   while (
     context.source.length > 0 &&
     !startsWith(context.source, '>') &&
@@ -753,13 +786,15 @@ function parseAttributes(
       advanceSpaces(context)
       continue
     }
+    // 如果是结束标签（报错，因为结束标签不可能存在属性）
     if (type === TagType.End) {
       emitError(context, ErrorCodes.END_TAG_WITH_ATTRIBUTES)
     }
 
+    // 解析 attr
     const attr = parseAttribute(context, attributeNames)
 
-    // Trim whitespace between class
+    // 去掉 class 两边的空格
     // https://github.com/vuejs/core/issues/4251
     if (
       attr.type === NodeTypes.ATTRIBUTE &&
@@ -769,6 +804,7 @@ function parseAttributes(
       attr.value.content = attr.value.content.replace(/\s+/g, ' ').trim()
     }
 
+    // 如果是开始标签（这个 type 指向的是标签 type
     if (type === TagType.Start) {
       props.push(attr)
     }
@@ -790,13 +826,16 @@ function parseAttribute(
   // Name.
   const start = getCursor(context)
   const match = /^[^\t\r\n\f />][^\t\r\n\f />=]*/.exec(context.source)!
+  // 匹配到的属性名
   const name = match[0]
 
+  // 如果已经存在了，提示重复属性，否则添加到集合中
   if (nameSet.has(name)) {
     emitError(context, ErrorCodes.DUPLICATE_ATTRIBUTE)
   }
   nameSet.add(name)
 
+  // 属性名是以 = 开始的
   if (name[0] === '=') {
     emitError(context, ErrorCodes.UNEXPECTED_EQUALS_SIGN_BEFORE_ATTRIBUTE_NAME)
   }
@@ -812,11 +851,13 @@ function parseAttribute(
     }
   }
 
+  // 截取掉属性名
   advanceBy(context, name.length)
 
   // Value
   let value: AttributeValue = undefined
 
+  // 解析属性值
   if (/^[\t\r\n\f ]*=/.test(context.source)) {
     advanceSpaces(context)
     advanceBy(context, 1)
@@ -834,7 +875,11 @@ function parseAttribute(
         name
       )!
 
+    // 是否是属性简写
     let isPropShorthand = startsWith(name, '.')
+    // 匹配指令的简写
+    // : 代表的是 bind
+    // @ 代表的是 on 事件绑定
     let dirName =
       match[1] ||
       (isPropShorthand || startsWith(name, ':')
@@ -948,9 +993,10 @@ function parseAttribute(
   }
 
   return {
-    type: NodeTypes.ATTRIBUTE,
-    name,
+    type: NodeTypes.ATTRIBUTE, // 类型是属性
+    name, // 属性名
     value: value && {
+      // 属性值
       type: NodeTypes.TEXT,
       content: value.content,
       loc: value.loc
@@ -1151,7 +1197,7 @@ function advanceBy(context: ParserContext, numberOfCharacters: number): void {
 
 /**
  * 跳过空格
- * @param context 
+ * @param context
  */
 function advanceSpaces(context: ParserContext): void {
   const match = /^[\t\r\n\f ]+/.exec(context.source)
