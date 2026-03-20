@@ -335,9 +335,10 @@ export function transform(root: RootNode, options: TransformOptions) {
     hoistStatic(root, context)
   }
   if (!options.ssr) {
+    // 创建根节点的 codegenNode
     createRootCodegen(root, context)
   }
-  // finalize meta information
+  // 最终确定元信息
   root.helpers = [...context.helpers.keys()]
   root.components = [...context.components]
   root.directives = [...context.directives]
@@ -351,17 +352,23 @@ export function transform(root: RootNode, options: TransformOptions) {
   }
 }
 
+/**
+ * 生成 root.codegenNode
+ * @param root 
+ * @param context 
+ */
 function createRootCodegen(root: RootNode, context: TransformContext) {
   const { helper } = context
   const { children } = root
+  // 如果只有一个子节点
   if (children.length === 1) {
     const child = children[0]
-    // if the single child is an element, turn it into a block.
+    // 如果只有一个子节点，给他添加到 block 中
     if (isSingleElementRoot(root, child) && child.codegenNode) {
-      // single element root is never hoisted so codegenNode will never be
-      // SimpleExpressionNode
+      // 单元素根节点永远不会被提升，因此 codegenNode 永远不会是 SimpleExpressionNode
       const codegenNode = child.codegenNode
       if (codegenNode.type === NodeTypes.VNODE_CALL) {
+        // 标记为 block
         makeBlock(codegenNode, context)
       }
       root.codegenNode = codegenNode
@@ -372,7 +379,7 @@ function createRootCodegen(root: RootNode, context: TransformContext) {
       root.codegenNode = child
     }
   } else if (children.length > 1) {
-    // root has multiple nodes - return a fragment block.
+    // 有多个子节点 - 返回一个 fragment block.
     let patchFlag = PatchFlags.STABLE_FRAGMENT
     let patchFlagText = PatchFlagNames[PatchFlags.STABLE_FRAGMENT]
     // check if the fragment actually contains a single valid child with
@@ -436,7 +443,6 @@ export function traverseNode(
 ) {
   // 当前遍历的 AST 存放在 currentNode 上
   context.currentNode = node
-  // 使用插件（默认是空的）
   const { nodeTransforms } = context
   const exitFns = []
   for (let i = 0; i < nodeTransforms.length; i++) {

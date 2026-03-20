@@ -24,6 +24,11 @@ export type TransformPreset = [
   Record<string, DirectiveTransform>
 ]
 
+/**
+ * 获取基本的转换器
+ * @param prefixIdentifiers 
+ * @returns 
+ */
 export function getBaseTransformPreset(
   prefixIdentifiers?: boolean
 ): TransformPreset {
@@ -88,6 +93,7 @@ export function baseCompile(
 
   // 1. template -> ast
   const ast = isString(template) ? baseParse(template, options) : template
+  // 获取转换器，主要是在 transform 中使用
   const [nodeTransforms, directiveTransforms] =
     getBaseTransformPreset(prefixIdentifiers)
 
@@ -103,10 +109,12 @@ export function baseCompile(
     ast,
     extend({}, options, {
       prefixIdentifiers,
+      // 节点转换器
       nodeTransforms: [
         ...nodeTransforms,
         ...(options.nodeTransforms || []) // user transforms
       ],
+      // 指令转换器
       directiveTransforms: extend(
         {},
         directiveTransforms,

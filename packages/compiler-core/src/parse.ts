@@ -222,7 +222,9 @@ function parseChildren(
             advanceBy(context, 3)
             continue
           } else if (/[a-z]/i.test(s[2])) {
-            // 这里为什么报错
+            // 这里为什么报错？
+            // 因为当前解析的是 children，children 里面怎么可能会解析出来结束标签呢。结束标签只可能在 element 中解析出来
+            // 所以这个时候肯定是多写了一个结束标签，然后报错，并把这个结束标签给消化掉
             emitError(context, ErrorCodes.X_INVALID_END_TAG)
             // 解析 tag 结束标签名
             parseTag(context, TagType.End, parent)
@@ -529,6 +531,7 @@ function parseElement(
     }
   }
 
+  // 目的是为了记住 element 在原始 template 上的精准位置
   element.loc = getSelection(context, element.loc.start)
 
   if (isPreBoundary) {

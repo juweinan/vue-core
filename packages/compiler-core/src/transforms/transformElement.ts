@@ -71,12 +71,19 @@ import {
 const directiveImportMap = new WeakMap<DirectiveNode, symbol>()
 
 // generate a JavaScript AST for this element's codegen
+/**
+ * 给 element 生成一个 AST
+ * @param node 
+ * @param context 
+ * @returns 
+ */
 export const transformElement: NodeTransform = (node, context) => {
-  // perform the work on exit, after all child expressions have been
-  // processed and merged.
+  // 在所有子表达式都已处理并合并后，执行退出时的工作。
   return function postTransformElement() {
+    // 当前处理的 node
     node = context.currentNode!
 
+    // 不是普通元素节点或者组件节点直接返回
     if (
       !(
         node.type === NodeTypes.ELEMENT &&
@@ -88,10 +95,10 @@ export const transformElement: NodeTransform = (node, context) => {
     }
 
     const { tag, props } = node
+    // 根据 tagType 判断是否是组件标签
     const isComponent = node.tagType === ElementTypes.COMPONENT
 
-    // The goal of the transform is to create a codegenNode implementing the
-    // VNodeCall interface.
+    // 转换的目标是创建一个实现VNodeCall接口的codegenNode.
     let vnodeTag = isComponent
       ? resolveComponentType(node as ComponentNode, context)
       : `"${tag}"`
@@ -244,6 +251,13 @@ export const transformElement: NodeTransform = (node, context) => {
   }
 }
 
+/**
+ * 处理组件类型
+ * @param node 
+ * @param context 
+ * @param ssr 
+ * @returns 
+ */
 export function resolveComponentType(
   node: ComponentNode,
   context: TransformContext,
@@ -251,8 +265,9 @@ export function resolveComponentType(
 ) {
   let { tag } = node
 
-  // 1. dynamic component
+  // 1. 动态组件 <component is="xxx"></component>
   const isExplicitDynamic = isComponentTag(tag)
+  // 找到 is 属性
   const isProp = findProp(node, 'is')
   if (isProp) {
     if (
