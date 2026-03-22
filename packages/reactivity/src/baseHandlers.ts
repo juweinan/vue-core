@@ -66,7 +66,7 @@ function createArrayInstrumentations() {
     instrumentations[key] = function (this: unknown[], ...args: unknown[]) {
       // 获取代理对象的原始数据（这里的 this 指向的 receiver，在日常开发中，通常对应的就是 reactive 返回的代理对象）
       const arr = toRaw(this) as any
-      // 遍历数组中的每一项，对于每一项都触发 track 依赖收集
+      // 遍历数组中的每一项，对于每一项都触发 track 依赖收集（收集的是数组的下标）
       for (let i = 0, l = this.length; i < l; i++) {
         track(arr, TrackOpTypes.GET, i + '')
       }

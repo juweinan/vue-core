@@ -56,6 +56,7 @@ export const MAP_KEY_ITERATE_KEY = Symbol(__DEV__ ? 'Map key iterate' : '')
 export class ReactiveEffect<T = any> {
   active = true
   deps: Dep[] = []
+  // 当存在嵌套 effect 时，可用于存储其上级 effect 实例
   parent: ReactiveEffect | undefined = undefined
 
   /**
@@ -438,6 +439,8 @@ export function trigger(
       // 这里将新的 dep 在创建成 Set 去重
       // 因为有可能一个 effect 即依赖了 arr[i] 又依赖了 length，这时候只保留一个 effect 就行
       // 因为这个 effect 执行一次就够了
+      // 还有一个原因执行 effect 的时候生成了新的 effect
+      // 会被追加到末尾并且立即执行，这就导致会出现死循环。所以下面在使用时又会转换成对象
       triggerEffects(createDep(effects))
     }
   }
