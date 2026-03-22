@@ -103,6 +103,7 @@ export const transformElement: NodeTransform = (node, context) => {
       ? resolveComponentType(node as ComponentNode, context)
       : `"${tag}"`
 
+    // 是不是动态组件
     const isDynamicComponent =
       isObject(vnodeTag) && vnodeTag.callee === RESOLVE_DYNAMIC_COMPONENT
 
@@ -114,8 +115,9 @@ export const transformElement: NodeTransform = (node, context) => {
     let dynamicPropNames: string[] | undefined
     let vnodeDirectives: VNodeCall['directives']
 
+    // 是否应该使用 block（动态组件、TELEPORT、SUSPENSE、svg、foreignObject）
     let shouldUseBlock =
-      // dynamic component may resolve to plain elements
+      // 动态组件可能会被处理成一个普通的元素
       isDynamicComponent ||
       vnodeTag === TELEPORT ||
       vnodeTag === SUSPENSE ||
@@ -128,6 +130,7 @@ export const transformElement: NodeTransform = (node, context) => {
 
     // props
     if (props.length > 0) {
+      // 如果有 props 则构建 props
       const propsBuildResult = buildProps(
         node,
         context,
@@ -190,7 +193,7 @@ export const transformElement: NodeTransform = (node, context) => {
       } else if (node.children.length === 1 && vnodeTag !== TELEPORT) {
         const child = node.children[0]
         const type = child.type
-        // check for dynamic text children
+        // 检查动态的文本子节点
         const hasDynamicTextChild =
           type === NodeTypes.INTERPOLATION ||
           type === NodeTypes.COMPOUND_EXPRESSION
@@ -397,6 +400,16 @@ function resolveSetupReference(name: string, context: TransformContext) {
 
 export type PropsExpression = ObjectExpression | CallExpression | ExpressionNode
 
+/**
+ * 构建 props
+ * @param node 
+ * @param context 
+ * @param props 
+ * @param isComponent 
+ * @param isDynamicComponent 
+ * @param ssr 
+ * @returns 
+ */
 export function buildProps(
   node: ElementNode,
   context: TransformContext,
@@ -415,11 +428,13 @@ export function buildProps(
   let properties: ObjectExpression['properties'] = []
   const mergeArgs: PropsExpression[] = []
   const runtimeDirectives: DirectiveNode[] = []
+  // 是否存在子节点
   const hasChildren = children.length > 0
+  // 是否应该使用 block
   let shouldUseBlock = false
 
   // patchFlag analysis
-  let patchFlag = 0
+  let patchFlag = 0 // 默认不需要 patchFlag
   let hasRef = false
   let hasClassBinding = false
   let hasStyleBinding = false
@@ -460,6 +475,8 @@ export function buildProps(
         return
       }
 
+      // 如果是 class 或者 style 则标记存在对应的动态绑定
+      // 否则，其他的属性全部添加到动态属性数组中
       if (name === 'ref') {
         hasRef = true
       } else if (name === 'class') {
@@ -471,6 +488,7 @@ export function buildProps(
       }
 
       // treat the dynamic class and style binding of the component as dynamic props
+      // 如果是组件，也要将 class 和 style 推入动态属性数组中
       if (
         isComponent &&
         (name === 'class' || name === 'style') &&
@@ -483,14 +501,21 @@ export function buildProps(
     }
   }
 
+  // 遍历 props 属性
   for (let i = 0; i < props.length; i++) {
-    // static attribute
+    // 静态属性
     const prop = props[i]
+    // 如果属性的类型是纯静态属性 比如 <div id="app" title="hello">
+    // ref 类型的要特殊处理，加 hasRef 等属性
+    // 然后把这些静态属性全部压入到 properties 中
     if (prop.type === NodeTypes.ATTRIBUTE) {
       const { loc, name, value } = prop
+      // 默认是静态的
       let isStatic = true
+      // 如果属性名是 ref，虽然这是一个静态的属性，但是也要标记 hasRef
       if (name === 'ref') {
         hasRef = true
+        // 在 v-for 里面，还需要额外添加一个 ref_for: true 的属性
         if (context.scopes.vFor > 0) {
           properties.push(
             createObjectProperty(
@@ -517,7 +542,7 @@ export function buildProps(
           )
         }
       }
-      // skip is on <component>, or is="vue:xxx"
+      // 跳过 is on <component>, or is="vue:xxx"
       if (
         name === 'is' &&
         (isComponentTag(tag) ||
@@ -545,12 +570,12 @@ export function buildProps(
         )
       )
     } else {
-      // directives
+      // 指令 比如 <div :id="count" @click="fn">
       const { name, arg, exp, loc } = prop
       const isVBind = name === 'bind'
       const isVOn = name === 'on'
 
-      // skip v-slot - it is handled by its dedicated transform.
+      // 跳过 v-slot - 使用它专属的转换器.
       if (name === 'slot') {
         if (!isComponent) {
           context.onError(
@@ -559,11 +584,11 @@ export function buildProps(
         }
         continue
       }
-      // skip v-once/v-memo - they are handled by dedicated transforms.
+      // 跳过 v-once/v-memo - 使用他们专属的转换器.
       if (name === 'once' || name === 'memo') {
         continue
       }
-      // skip v-is and :is on <component>
+      // 跳过 v-is and :is on <component>
       if (
         name === 'is' ||
         (isVBind &&
@@ -577,21 +602,21 @@ export function buildProps(
       ) {
         continue
       }
-      // skip v-on in SSR compilation
+      // 跳过 v-on in SSR 场景下
       if (isVOn && ssr) {
         continue
       }
 
       if (
-        // #938: elements with dynamic keys should be forced into blocks
+        // #938: element 存在动态的 key 时应该添加到 blocks 中
         (isVBind && isStaticArgOf(arg, 'key')) ||
-        // inline before-update hooks need to force block so that it is invoked
-        // before children
+        // 或者是特殊的生命周期钩子
         (isVOn && hasChildren && isStaticArgOf(arg, 'vue:before-update'))
       ) {
         shouldUseBlock = true
       }
 
+      // 如果绑定的是 ref，那么直接把属性添加进入（跟上面的 ref 不相同的是，这里是 v-for 的动态绑定 ref）
       if (isVBind && isStaticArgOf(arg, 'ref') && context.scopes.vFor > 0) {
         properties.push(
           createObjectProperty(
@@ -601,10 +626,13 @@ export function buildProps(
         )
       }
 
-      // special case for v-bind and v-on with no argument
+      // 处理 v-bind=“object” 这种全量动态的情况
+      // 把刚才的静态属性放到 mergeArgs 中，然后将这个全量的属性也添加到 mergeArgs 中
       if (!arg && (isVBind || isVOn)) {
-        hasDynamicKeys = true
+        hasDynamicKeys = true // 全量属性时，标记为动态属性
         if (exp) {
+          // 如果之前已经添加了一些静态的属性，这时候就把这个属性存起来，并清空 properties
+          // 用来存储这个大的 object
           if (properties.length) {
             mergeArgs.push(
               createObjectExpression(dedupeProperties(properties), elementLoc)
@@ -678,11 +706,14 @@ export function buildProps(
         continue
       }
 
+      // 处理具体的指令转化（如 :id, :class）
       const directiveTransform = context.directiveTransforms[name]
       if (directiveTransform) {
-        // has built-in directive transform.
+        // 执行 v-bind 的转换器
         const { props, needRuntime } = directiveTransform(prop, node, context)
+        // 【关键点】：对转换后的结果执行分析，去打 patchFlag 的草稿
         !ssr && props.forEach(analyzePatchFlag)
+        // 将转换后的属性保存起来
         properties.push(...props)
         if (needRuntime) {
           runtimeDirectives.push(prop)
@@ -704,7 +735,7 @@ export function buildProps(
 
   let propsExpression: PropsExpression | undefined = undefined
 
-  // has v-bind="object" or v-on="object", wrap with mergeProps
+  // 如果有 v-bind="obj"，必须用 mergeProps 函数来包装
   if (mergeArgs.length) {
     if (properties.length) {
       mergeArgs.push(
@@ -712,6 +743,7 @@ export function buildProps(
       )
     }
     if (mergeArgs.length > 1) {
+      // 生成类似 _mergeProps(obj1, { id: 'a' }) 的调用
       propsExpression = createCallExpression(
         context.helper(MERGE_PROPS),
         mergeArgs,
@@ -722,22 +754,27 @@ export function buildProps(
       propsExpression = mergeArgs[0]
     }
   } else if (properties.length) {
+    // 如果全是普通属性，直接生成一个普通的 JS 对象代码 { id: 'app', class: _ctx.cls }
     propsExpression = createObjectExpression(
       dedupeProperties(properties),
       elementLoc
     )
   }
 
-  // patchFlag analysis
+  // 是否存在动态属性
   if (hasDynamicKeys) {
+    // 优先级最高：键名不固定，只能全量对比
     patchFlag |= PatchFlags.FULL_PROPS
   } else {
+    // 动态 class
     if (hasClassBinding && !isComponent) {
       patchFlag |= PatchFlags.CLASS
     }
+    // 动态 style
     if (hasStyleBinding && !isComponent) {
       patchFlag |= PatchFlags.STYLE
     }
+    // 其他动态属性
     if (dynamicPropNames.length) {
       patchFlag |= PatchFlags.PROPS
     }
@@ -750,6 +787,7 @@ export function buildProps(
     (patchFlag === 0 || patchFlag === PatchFlags.HYDRATE_EVENTS) &&
     (hasRef || hasVnodeHook || runtimeDirectives.length > 0)
   ) {
+    // 兜底标记：如果没有 patchFlag 但有 ref 或指令，也要标记为“需要检查”
     patchFlag |= PatchFlags.NEED_PATCH
   }
 
@@ -757,8 +795,7 @@ export function buildProps(
   if (!context.inSSR && propsExpression) {
     switch (propsExpression.type) {
       case NodeTypes.JS_OBJECT_EXPRESSION:
-        // means that there is no v-bind,
-        // but still need to deal with dynamic key binding
+        // 如果是普通对象，检查里面的 class 和 style
         let classKeyIndex = -1
         let styleKeyIndex = -1
         let hasDynamicKey = false

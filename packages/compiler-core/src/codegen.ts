@@ -220,11 +220,13 @@ export function generate(
     ? createCodegenContext(ast, options)
     : context
   if (!__BROWSER__ && mode === 'module') {
+    // 生成 import { ... } from "vue"
     genModulePreamble(ast, preambleContext, genScopeId, isSetupInlined)
   } else {
+    // 生成 const _Vue = Vue
     genFunctionPreamble(ast, preambleContext)
   }
-  // enter render function
+  // 创建 render 函数的壳子
   const functionName = ssr ? `ssrRender` : `render`
   const args = ssr ? ['_ctx', '_push', '_parent', '_attrs'] : ['_ctx', '_cache']
   if (!__BROWSER__ && options.bindingMetadata && !options.inline) {
@@ -241,7 +243,7 @@ export function generate(
   } else {
     push(`function ${functionName}(${signature}) {`)
   }
-  indent()
+  indent() // 缩进
 
   if (useWithBlock) {
     push(`with (_ctx) {`)
@@ -257,12 +259,14 @@ export function generate(
 
   // generate asset resolution statements
   if (ast.components.length) {
+    // 生成 _resolveComponent("my-comp")
     genAssets(ast.components, 'component', context)
     if (ast.directives.length || ast.temps > 0) {
       newline()
     }
   }
   if (ast.directives.length) {
+    // 生成 _resolveDirective("my-dir")
     genAssets(ast.directives, 'directive', context)
     if (ast.temps > 0) {
       newline()
@@ -289,6 +293,7 @@ export function generate(
   if (!ssr) {
     push(`return `)
   }
+  // 生成最终的代码
   if (ast.codegenNode) {
     genNode(ast.codegenNode, context)
   } else {

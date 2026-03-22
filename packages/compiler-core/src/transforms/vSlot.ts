@@ -131,6 +131,8 @@ export function buildSlots(
 
   // If the slot is inside a v-for or another v-slot, force it to be dynamic
   // since it likely uses a scope variable.
+  // 如果这个 slot 本身就在一个 v-for 循环里面，或者被嵌套在一个插槽里面
+  // 则默认这个组件是动态的
   let hasDynamicSlots = context.scopes.vSlot > 0 || context.scopes.vFor > 0
   // with `prefixIdentifiers: true`, this can be further optimized to make
   // it dynamic only when the slot actually uses the scope variables.

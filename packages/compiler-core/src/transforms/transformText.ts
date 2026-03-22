@@ -98,6 +98,7 @@ export const transformText: NodeTransform = (node, context) => {
             !context.ssr &&
             getConstantType(child, context) === ConstantTypes.NOT_CONSTANT
           ) {
+            // 如果发现这个文本不是死值（比如包含 {{ msg }}）
             callArgs.push(
               PatchFlags.TEXT +
                 (__DEV__ ? ` /* ${PatchFlagNames[PatchFlags.TEXT]} */` : ``)
